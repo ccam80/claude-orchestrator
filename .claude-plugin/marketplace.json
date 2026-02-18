@@ -1,0 +1,24 @@
+{
+  "name": "claude-orchestrator-marketplace",
+  "metadata": {
+    "description": "Orchestrated planning and parallel implementation for Claude Code. Plans features collaboratively, specs phases in detail, then spawns parallel implementer agents with lock-based coordination.",
+    "version": "0.1.0",
+    "homepage": "https://github.com/ccam80/claude-orchestrator"
+  },
+  "owner": {
+    "name": "Chris Cameron"
+  },
+  "plugins": [
+    {
+      "name": "claude-orchestrator",
+      "description": "Orchestrated planning and parallel implementation skills",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/plan-orchestrated",
+        "./skills/plan-spec",
+        "./skills/implement-orchestrated"
+      ]
+    }
+  ]
+}
