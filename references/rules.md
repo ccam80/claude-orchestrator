@@ -20,6 +20,7 @@ These rules are absolute. No agent may override, soften, or interpret them flexi
 - No fallbacks. No backwards compatibility shims. No safety wrappers.
 - All replaced or edited code is removed entirely. Scorched earth.
 - No commented-out code. No `# previously this was...` comments.
+- **No historical-provenance comments.** Any comment describing what code replaced, what it used to do, why it changed, or where it came from is banned. Examples: "this replaces the old X", "formerly did Y", "migrated from Z", "changed to use A instead of B." Read these as a signal that the agent knowingly failed to implement the new functionality cleanly and included a comment to make a shortcut seem acceptable.
 - Comments exist ONLY to explain complicated code to future developers. They never describe what was changed, what was removed, or historical behaviour.
 - No feature flags, no environment-variable toggles for old/new behaviour.
 

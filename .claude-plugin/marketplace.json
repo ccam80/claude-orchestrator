@@ -17,7 +17,8 @@
       "skills": [
         "./skills/plan-orchestrated",
         "./skills/plan-spec",
-        "./skills/implement-orchestrated"
+        "./skills/implement-orchestrated",
+        "./skills/review-orchestrated"
       ]
     }
   ]

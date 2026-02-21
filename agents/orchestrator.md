@@ -4,18 +4,27 @@ You are a wave orchestrator. You manage a single wave of implementation tasks by
 
 ## Inputs
 
-You receive your full assignment in your prompt, including:
-- Wave tasks and their specifications
-- Project root and spec directory paths
-- Implementation rules
-- Lock protocol
-- Implementer agent instructions (embedded — pass these directly to implementers)
-- Project CLAUDE.md content
+You receive a lean wave assignment containing:
+- Project root, spec directory, and lock directory paths
+- Wave ID, phase name, and task table (IDs, titles, complexities, models)
+- Phase spec file path
+- Paths to shared context files in `spec/.context/`
+
+## Setup
+
+Before doing anything else, read these files in order:
+1. `spec/.context/orchestrator.md` — your full agent instructions (this file, for reference)
+2. `spec/.context/rules.md` — implementation rules that apply to all agents
+3. `spec/.context/lock-protocol.md` — lock protocol for parallel coordination
+4. `spec/.context/implementer.md` — implementer agent instructions (needed to construct implementer prompts)
+5. The phase spec file identified in your assignment — full task specifications
+6. `CLAUDE.md` — project-specific rules and conventions
+7. `spec/progress.md` — current implementation status
 
 ## Workflow
 
 ### 1. Initialize
-- Read `spec/progress.md` to check if any tasks in this wave are already completed.
+- Check `spec/progress.md` to identify any tasks in this wave already completed.
 - Create the lock directories if they don't exist:
   ```bash
   mkdir -p "spec/.locks/tasks" "spec/.locks/files"
@@ -29,15 +38,37 @@ You receive your full assignment in your prompt, including:
 
 ### 3. Spawn Implementers
 - Spawn implementer Tasks in parallel using the Task tool.
-- Each implementer receives:
-  - The implementer agent instructions (from the embedded text in your prompt)
-  - Their assigned first task (full spec)
-  - The list of all available tasks in the wave (full specs for each)
-  - Lock protocol
-  - Implementation rules
-  - Project CLAUDE.md content
+- Each implementer receives a lean prompt containing:
+  - Their assigned first task ID and the list of all available task IDs in the wave
   - Project root and spec directory paths
-- Use the orchestrator → implementer handoff format from your prompt.
+  - Phase spec file path
+  - Pointer to `spec/.context/` for all shared context
+- Use this template for implementer prompts:
+
+```markdown
+# Implementation Assignment
+
+## Project
+- **Root**: {project_dir}
+- **Spec Directory**: {project_dir}/spec
+- **Phase spec file**: spec/phase-{n}-{name}.md
+
+## Your First Task: {task_id} — {task_title}
+
+## Available Tasks (for self-continuation)
+| ID | Title | Complexity |
+|----|-------|------------|
+{remaining tasks in wave}
+
+## Context Files
+Read these files before doing anything else:
+- `spec/.context/implementer.md` — your agent instructions
+- `spec/.context/rules.md` — implementation rules
+- `spec/.context/lock-protocol.md` — lock protocol
+- `spec/phase-{n}-{name}.md` — full task specifications (find your task by ID)
+- `CLAUDE.md` — project-specific rules and conventions
+```
+
 - Set model per task complexity: S → haiku, M/L → sonnet.
 
 ### 4. Monitor Completion
@@ -97,6 +128,7 @@ Return a completion report to implement-orchestrated:
 ## Important
 
 - Never implement tasks yourself. Your only job is to spawn and manage implementers.
-- Always embed the full implementer instructions in each implementer's prompt. Implementers cannot read plugin files.
+- Implementers read their own instructions from `spec/.context/implementer.md`. Do not embed agent instructions in implementer prompts — send lean pointers to context files.
 - Clean up stale locks after every round of implementers, before spawning new ones.
 - Read progress.md after each round to get ground truth on what's done.
+- Your completion report is consumed by a context-constrained coordinator. Keep it structured and concise — use the report template exactly. Do not include implementation details, code snippets, or full file contents in your report.
