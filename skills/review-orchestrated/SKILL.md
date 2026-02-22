@@ -16,16 +16,12 @@ You are the top-level review coordinator. You read specs, spawn reviewer agents 
 3. Read all phase spec files in `spec/` (files matching `spec/phase-*.md`).
 4. Read the project's `CLAUDE.md` for project-specific rules.
 5. Read `spec/progress.md` to determine what's been implemented and which tasks are complete.
-6. Read the following plugin references:
-   - `${CLAUDE_PLUGIN_ROOT}/references/rules.md` — implementation rules
-   - `${CLAUDE_PLUGIN_ROOT}/agents/reviewer.md` — reviewer agent instructions
-7. Materialize shared context files so reviewer agents can read them from the project:
+6. Materialize shared context files for reviewer agents by running:
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" review "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
    ```
-   spec/.context/rules.md     ← contents of references/rules.md
-   spec/.context/reviewer.md  ← contents of agents/reviewer.md
-   ```
-   Only write these if they don't already exist. After an `implement-orchestrated` run they will already be present.
-8. If `$ARGUMENTS` specifies a phase, limit the review to that phase. Otherwise review all phases that have at least one completed task in `spec/progress.md`.
+   This copies rules and reviewer files to `spec/.context/` in a single command. Do NOT read the agent files yourself — the script handles it. Safe to run even if files already exist from `implement-orchestrated`.
+7. If `$ARGUMENTS` specifies a phase, limit the review to that phase. Otherwise review all phases that have at least one completed task in `spec/progress.md`.
 
 ## Review Execution
 
@@ -35,27 +31,7 @@ From `spec/progress.md`, identify which phases have completed tasks. Group them 
 
 ### Spawn Reviewers
 
-For each phase in scope, spawn one reviewer Task **in parallel**. Build a lean reviewer prompt — the reviewer reads its own instructions and shared context from `spec/.context/`.
-
-```markdown
-# Phase Review Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-
-## Review Scope: Phase {n} — {phase_name}
-- **Phase spec file**: spec/phase-{n}-{name}.md
-- **Tasks in scope**: all completed tasks for this phase
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/reviewer.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules to check against
-- `spec/phase-{n}-{name}.md` — task specifications for this phase
-- `CLAUDE.md` — project-specific rules and conventions
-- `spec/progress.md` — implementation status (source of truth for file lists)
-```
+For each phase in scope, spawn one reviewer Task **in parallel**. Build a lean reviewer prompt using the **"review-orchestrated → reviewer"** template from `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md`. Fill in phase details. Do not embed agent instructions — the reviewer reads them from `spec/.context/`.
 
 Spawn each reviewer Task with:
 - **subagent_type**: `general-purpose`
@@ -151,13 +127,16 @@ Present a final summary:
 ## Context Conservation
 
 You are a coordinator. Protect your context:
+- **NEVER use `run_in_background` on Task calls.** Background tasks require `TaskOutput` polling, which dumps partial agent output into your context. Use blocking Task calls only.
+- **NEVER use `TaskOutput`.** If you need concurrency, spawn multiple blocking Task calls in a single message — they run in parallel automatically.
 - **Do not read implementation files yourself.** Rely on reviewer reports for quality information.
 - **Do not re-review after fixes.** The reviewer agents already identified the violations. Your fixes are mechanical removals — they don't need re-auditing.
 - Read `spec/progress.md` for file lists, not git diffs.
 
 ## Important
 
-- Materialize context files only if they don't already exist (step 7). After `implement-orchestrated` they will be present.
+- You MUST run the materialize script during setup (step 6). It always overwrites, so it's safe to run after `implement-orchestrated`.
+- Read `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md` once at the start to get the reviewer prompt template. Do not memorize it — refer back to the file when constructing each prompt.
 - All reviewer prompts are lean pointers to `spec/.context/`. Never embed agent instructions or rules in prompts.
 - Never fix non-mechanical violations without user direction.
 - Cleanup is subtractive only. Never add code, change logic, or modify test assertions during cleanup.

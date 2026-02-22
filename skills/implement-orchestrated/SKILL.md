@@ -16,22 +16,12 @@ You are the top-level implementation coordinator. You read specs, spawn orchestr
 3. Read all phase spec files in `spec/` (files matching `spec/phase-*.md`).
 4. Read the project's `CLAUDE.md` for project-specific rules.
 5. Read `spec/progress.md` to determine what's already been implemented.
-6. Read the following plugin references:
-   - `${CLAUDE_PLUGIN_ROOT}/references/lock-protocol.md` — lock protocol
-   - `${CLAUDE_PLUGIN_ROOT}/references/rules.md` — implementation rules
-   - `${CLAUDE_PLUGIN_ROOT}/agents/orchestrator.md` — orchestrator agent instructions
-   - `${CLAUDE_PLUGIN_ROOT}/agents/implementer.md` — implementer agent instructions
-   - `${CLAUDE_PLUGIN_ROOT}/agents/reviewer.md` — reviewer agent instructions
-7. Write shared context files so agents can read them from the project:
+6. Materialize shared context files for agents by running:
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" implement "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
    ```
-   spec/.context/rules.md          ← contents of references/rules.md
-   spec/.context/lock-protocol.md  ← contents of references/lock-protocol.md
-   spec/.context/orchestrator.md   ← contents of agents/orchestrator.md
-   spec/.context/implementer.md    ← contents of agents/implementer.md
-   spec/.context/reviewer.md       ← contents of agents/reviewer.md
-   ```
-   Write these once before the first wave. Overwrite if they already exist.
-8. If `$ARGUMENTS` specifies a phase, limit execution to that phase. Otherwise execute all phases in order.
+   This copies all 5 agent/reference files to `spec/.context/` in a single command. Do NOT read the agent files yourself — the script handles it.
+7. If `$ARGUMENTS` specifies a phase, limit execution to that phase. Otherwise execute all phases in order.
 
 ## Wave Execution
 
@@ -44,37 +34,7 @@ You are the top-level implementation coordinator. You read specs, spawn orchestr
 
 #### 1. Build Orchestrator Prompt
 
-Construct a lean orchestrator prompt. The orchestrator reads its own instructions and all shared context from `spec/.context/` — do not embed them.
-
-```markdown
-# Wave Orchestration Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-- **Lock Directory**: {project_dir}/spec/.locks
-
-## Wave {wave_id}: {wave_name}
-- **Phase**: {phase_name}
-- **Phase spec file**: spec/phase-{n}-{name}.md
-- **Prerequisite waves**: {completed_wave_ids}
-- **Max parallel implementers**: {max_parallel, default 4}
-
-## Tasks
-| ID | Title | Complexity | Model |
-|----|-------|------------|-------|
-| {id} | {title} | S/M/L | haiku/sonnet |
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/orchestrator.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules (apply to all agents)
-- `spec/.context/lock-protocol.md` — lock protocol for parallel coordination
-- `spec/.context/implementer.md` — implementer agent instructions (for constructing implementer prompts)
-- `spec/phase-{n}-{name}.md` — full task specifications for this wave
-- `CLAUDE.md` — project-specific rules and conventions
-- `spec/progress.md` — current implementation status
-```
+Construct a lean orchestrator prompt using the **"implement-orchestrated → orchestrator"** template from `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md`. Fill in wave/phase/task details. Do not embed agent instructions — the orchestrator reads them from `spec/.context/`.
 
 **Complexity → model mapping**:
 - S (Small) → haiku
@@ -106,31 +66,7 @@ After the orchestrator Task returns:
 
 After a wave completes, spawn a reviewer agent to audit the just-completed wave's output. If there is a next wave to execute, spawn the reviewer **in parallel** with the next wave's orchestrator.
 
-Build a lean reviewer prompt. The reviewer reads its own instructions and shared context from `spec/.context/` — do not embed them.
-
-```markdown
-# Wave Review Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-
-## Wave {wave_id}: {wave_name} (just completed)
-- **Phase**: {phase_name}
-- **Phase spec file**: spec/phase-{n}-{name}.md
-
-## Wave Completion Report
-{the completion report returned by the orchestrator for this wave —
-task statuses and test result counts. For file lists, read spec/progress.md directly.}
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/reviewer.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules to check against
-- `spec/phase-{n}-{name}.md` — task specifications for the reviewed wave
-- `CLAUDE.md` — project-specific rules and conventions
-- `spec/progress.md` — implementation status (source of truth for file lists)
-```
+Build a lean reviewer prompt using the **"implement-orchestrated → reviewer"** template from `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md`. Fill in wave/phase details and include the orchestrator's completion report. Do not embed agent instructions.
 
 Spawn the reviewer Task with:
 - **subagent_type**: `general-purpose`
@@ -175,14 +111,16 @@ To check what's complete, read the file and look for task entries with `Status: 
 
 You are a long-running coordinator. Every byte you read costs context that you need for later waves. Protect your context aggressively:
 
+- **NEVER use `run_in_background` on Task calls.** Background tasks require `TaskOutput` polling, which dumps partial agent output into your context. Use blocking Task calls only.
+- **NEVER use `TaskOutput`.** If you need concurrency, spawn multiple blocking Task calls in a single message — they run in parallel automatically.
 - **NEVER poll or read agent outputs directly.** Do not read the full text returned by orchestrator or implementer Tasks. The completion report structure exists so you can parse status without absorbing implementation details.
-- **NEVER read full git diffs.** If you need to gauge the scope of changes, poll a low-context proxy like `git diff --stat | wc -l` or `git diff --shortstat`. Never read the diff content itself.
+- **NEVER read full git diffs.** If you need to gauge the scope of changes, use `git diff --stat | wc -l` or `git diff --shortstat`. Never read the diff content itself.
 - **Rely on `spec/progress.md` for task status**, not on parsing agent output.
 - **Rely on the reviewer report for quality assessment**, not on reading implementation files yourself.
 
 ## Important
 
-- You MUST write shared context files to `spec/.context/` during setup (step 7). Agent prompts are lean pointers that tell agents to read these files — not embedded copies.
-- The lock protocol file at `${CLAUDE_PLUGIN_ROOT}/references/lock-protocol.md` is the canonical reference. It gets copied to `spec/.context/lock-protocol.md` during setup.
+- You MUST run the materialize script during setup (step 6). Agent prompts are lean pointers that tell agents to read `spec/.context/` files — not embedded copies.
+- Read `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md` once at the start to get prompt templates. Do not memorize them — refer back to the file when constructing each prompt.
 - Do not implement tasks yourself. Your job is to coordinate — read specs, spawn orchestrators and reviewers, track progress, report to user.
 - Do not review implementations yourself. Spawn the reviewer agent and present its report to the user.
