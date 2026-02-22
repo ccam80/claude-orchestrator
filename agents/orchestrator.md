@@ -37,12 +37,14 @@ Before doing anything else, read these files in order:
 - Distribute tasks: assign one task per implementer as their starting task. Include the full available task list so they can self-continue.
 
 ### 3. Spawn Implementers
-- Spawn implementer Tasks **in parallel** using the **Task tool**.
+- Spawn ALL implementer Tasks **in a single message** using the **Task tool** with background mode.
 - Each Task call MUST specify these parameters:
   - **subagent_type**: `claude-orchestrator:implementer`
   - **model**: set per task complexity — S → `haiku`, M/L → `sonnet`
   - **prompt**: the lean prompt below
   - **description**: short label, e.g. `"Implement task {id}"`
+  - **run_in_background**: `true`
+- After spawning all implementers in one message, call `TaskOutput(task_id, block=true)` for each in a follow-up message to wait for completion.
 - Each implementer receives a lean prompt containing:
   - Their assigned first task ID and the list of all available task IDs in the wave
   - Project root and spec directory paths
@@ -75,8 +77,8 @@ Read these files before doing anything else:
 ```
 
 ### 4. Monitor Completion
-- Wait for all implementer Tasks to return.
-- Read `spec/progress.md` to determine completion status.
+- Call `TaskOutput(task_id, block=true)` for each implementer spawned in step 3. Collect their completion reports.
+- Read `spec/progress.md` to determine completion status (source of truth — do not rely solely on implementer reports).
 - Check for incomplete tasks.
 
 ### 5. Handle Incomplete Tasks

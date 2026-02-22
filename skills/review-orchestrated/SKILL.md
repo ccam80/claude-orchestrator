@@ -2,7 +2,7 @@
 name: review-orchestrated
 description: Review completed implementation against specs and rules. Spawns reviewer agents per phase, presents findings, then fixes mechanical violations with user approval.
 argument-hint: <phase name or number, or blank for all completed phases>
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, AskUserQuestion]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskOutput, AskUserQuestion]
 ---
 
 # Review Orchestrated
@@ -31,22 +31,27 @@ From `spec/progress.md`, identify which phases have completed tasks. Group them 
 
 ### Spawn Reviewers
 
-For each phase in scope, spawn one reviewer Task **in parallel**. Build a lean reviewer prompt using the **"review-orchestrated → reviewer"** template from `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md`. Fill in phase details. Do not embed agent instructions — the reviewer reads them from `spec/.context/`.
+For each phase in scope, spawn one reviewer Task **in parallel** as a background task. Build a lean reviewer prompt using the **"review-orchestrated → reviewer"** template from `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md`. Fill in phase details — the template now includes a `Report Path` field. Do not embed agent instructions — the reviewer reads them from `spec/.context/`.
 
 Spawn each reviewer Task with:
 - **subagent_type**: `claude-orchestrator:reviewer`
 - **model**: `sonnet`
 - **prompt**: the constructed prompt above
+- **run_in_background**: `true`
+
+Spawn all reviewer Tasks in a single message. Then call `TaskOutput(task_id, block=true)` for each to collect their lean summaries.
 
 ### Consolidate Findings
 
-After all reviewer Tasks return:
-1. Collect all reports.
-2. Present a consolidated summary to the user:
+After all reviewer `TaskOutput` calls return:
+1. Collect the lean summaries (tallies + critical findings).
+2. Read the full report files from `spec/reviews/phase-{n}.md` for each phase reviewed.
+   - If a report file is missing despite a successful `TaskOutput`, warn the user that the reviewer failed to write its report. Ask whether to re-run the review for that phase or proceed with the lean summary alone.
+3. Present a consolidated summary to the user:
    - Per-phase verdict (clean / has-violations)
-   - Total violation count, gap count, weak test count, legacy reference count
-   - Full violation details organized by phase
-3. If all phases are clean → report "All clean" and stop.
+   - Total violation count, gap count, weak test count, legacy reference count (from lean summaries)
+   - Full violation details organized by phase (from the report files)
+4. If all phases are clean → report "All clean" and stop.
 
 ## Cleanup
 
@@ -127,8 +132,9 @@ Present a final summary:
 ## Context Conservation
 
 You are a coordinator. Protect your context:
-- **NEVER use `run_in_background` on Task calls.** Background tasks require `TaskOutput` polling, which dumps partial agent output into your context. Use blocking Task calls only.
-- **NEVER use `TaskOutput`.** If you need concurrency, spawn multiple blocking Task calls in a single message — they run in parallel automatically.
+- **ALWAYS use `run_in_background: true` on Task calls.** This prevents full Task return values from flooding your context. After spawning, use `TaskOutput(task_id, block=true)` to wait for completion and retrieve only the lean return value.
+- **Use `TaskOutput` with `block=true` only.** Never poll with `block=false` — it wastes context on partial output. Spawn the Task, then call `TaskOutput(task_id, block=true)` when you need the result.
+- **Spawn-then-wait pattern:** For parallel execution, spawn multiple background Tasks in one message, then call `TaskOutput` for each in a subsequent message. For sequential execution, spawn one background Task and immediately `TaskOutput` it.
 - **Do not read implementation files yourself.** Rely on reviewer reports for quality information.
 - **Do not re-review after fixes.** The reviewer agents already identified the violations. Your fixes are mechanical removals — they don't need re-auditing.
 - Read `spec/progress.md` for file lists, not git diffs.

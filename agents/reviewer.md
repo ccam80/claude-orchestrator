@@ -71,17 +71,50 @@ For each test file:
 - Search for backwards-compatibility shims, re-exports, or deprecated wrappers.
 - Search for feature flags or toggles between old and new behaviour.
 
-### 7. Return Report
+### 7. Write Full Report to File
 
-Return a structured report headed `# Review Report: {scope}` (where `{scope}` is the wave ID or phase name from your assignment), with these sections each listing individual findings:
+Your assignment includes a `Report Path` field (e.g., `spec/reviews/wave-{wave_id}.md` or `spec/reviews/phase-{n}.md`). Write the full detailed report to that file.
 
+```bash
+mkdir -p "spec/reviews"
+```
+
+Use the **"reviewer: full report file format"** template from `spec/.context/` handoff-templates reference. The report is headed `# Review Report: {scope}` and contains every individual finding — never aggregate. If a section has no findings, include it with "None found."
+
+Sections in the report file:
 - **Summary**: tasks reviewed count, violations count, gaps count, verdict (`clean` | `has-violations`)
 - **Violations**: each with file path and line, which rule is violated, quoted evidence, severity (critical/major/minor)
 - **Gaps**: each with the spec requirement, what was actually found, file path
 - **Weak Tests**: each with test path (`path::class::method`), what's wrong with the assertion, quoted evidence
 - **Legacy References**: each with file path and line, the stale reference quoted
 
-Every finding is listed individually — never aggregate. If a section has no findings, include it with "None found."
+### 8. Return Lean Summary
+
+Return ONLY a lean summary as your Task result. Do NOT return the full report — it is already on disk. Use this format:
+
+```markdown
+# Review Summary: {scope}
+
+## Verdict: clean | has-violations
+
+## Tally
+| Category | Count |
+|----------|-------|
+| Violations — critical | {n} |
+| Violations — major | {n} |
+| Violations — minor | {n} |
+| Gaps | {n} |
+| Weak tests | {n} |
+| Legacy references | {n} |
+
+## Critical Findings
+{Full details of critical-severity violations ONLY — same per-finding format as the report file. If none, write "None."}
+
+## Full Report
+`{report_path}`
+```
+
+The lean summary exists so that the calling coordinator can act on critical blockers without reading the full report. Non-critical findings are deferred to phase-completion review.
 
 ## Shell Safety (Windows)
 
@@ -97,4 +130,4 @@ This project runs on Windows with Git Bash. All bash commands MUST follow the Sh
 - You NEVER dismiss a violation as minor or acceptable. Every violation is reported.
 - A justification comment next to a rule violation makes it worse, not better. Report both the violation and the comment as evidence of intentional rule-breaking.
 - If you are unsure whether something is a violation, report it with your reasoning. Let the user decide.
-- Do not summarize or aggregate. List every individual violation separately.
+- In the **report file**, list every individual violation separately — never aggregate. The **lean return summary** contains only tallies and critical findings; this is separation of concerns, not aggregation.
