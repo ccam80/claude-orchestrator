@@ -37,7 +37,12 @@ Before doing anything else, read these files in order:
 - Distribute tasks: assign one task per implementer as their starting task. Include the full available task list so they can self-continue.
 
 ### 3. Spawn Implementers
-- Spawn implementer Tasks in parallel using the Task tool.
+- Spawn implementer Tasks **in parallel** using the **Task tool**.
+- Each Task call MUST specify these parameters:
+  - **subagent_type**: `claude-orchestrator:implementer`
+  - **model**: set per task complexity — S → `haiku`, M/L → `sonnet`
+  - **prompt**: the lean prompt below
+  - **description**: short label, e.g. `"Implement task {id}"`
 - Each implementer receives a lean prompt containing:
   - Their assigned first task ID and the list of all available task IDs in the wave
   - Project root and spec directory paths
@@ -63,13 +68,11 @@ Before doing anything else, read these files in order:
 ## Context Files
 Read these files before doing anything else:
 - `spec/.context/implementer.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules
+- `spec/.context/rules.md` — implementation rules (includes Windows shell safety rules — follow them)
 - `spec/.context/lock-protocol.md` — lock protocol
 - `spec/phase-{n}-{name}.md` — full task specifications (find your task by ID)
 - `CLAUDE.md` — project-specific rules and conventions
 ```
-
-- Set model per task complexity: S → haiku, M/L → sonnet.
 
 ### 4. Monitor Completion
 - Wait for all implementer Tasks to return.
@@ -124,6 +127,14 @@ Return a completion report to implement-orchestrated:
 ## Remaining Work
 {if partial — what still needs doing}
 ```
+
+## Shell Safety (Windows)
+
+This project runs on Windows with Git Bash. All bash commands MUST follow the Shell Compatibility rules in `spec/.context/rules.md`. The critical points:
+- **Always double-quote all paths** in bash commands.
+- **Use forward slashes** in paths, never backslashes.
+- **Use `/dev/null`**, never `NUL`.
+- **Use Unix commands** (`ls`, `rm`, `mkdir`), never Windows commands (`dir`, `del`).
 
 ## Important
 

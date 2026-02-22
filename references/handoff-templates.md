@@ -24,7 +24,7 @@
 ## Context Files
 Read these files before doing anything else:
 - `spec/.context/orchestrator.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules (apply to all agents)
+- `spec/.context/rules.md` — implementation rules (apply to all agents, includes Windows shell safety rules)
 - `spec/.context/lock-protocol.md` — lock protocol for parallel coordination
 - `spec/.context/implementer.md` — implementer agent instructions (for constructing implementer prompts)
 - `spec/phase-{n}-{name}.md` — full task specifications for this wave
@@ -52,7 +52,7 @@ Read these files before doing anything else:
 ## Context Files
 Read these files before doing anything else:
 - `spec/.context/implementer.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules
+- `spec/.context/rules.md` — implementation rules (includes Windows shell safety rules — follow them)
 - `spec/.context/lock-protocol.md` — lock protocol
 - `spec/phase-{n}-{name}.md` — full task specifications (find your task by ID)
 - `CLAUDE.md` — project-specific rules and conventions

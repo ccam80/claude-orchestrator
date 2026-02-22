@@ -4,6 +4,8 @@
 
 `mkdir` is atomic on all platforms. Directory existence = lock held.
 
+> **Windows note**: All bash commands in this file assume Git Bash. Always double-quote paths and use forward slashes. See the Shell Compatibility section in `rules.md`.
+
 ## Directory Structure
 
 ```

@@ -83,6 +83,14 @@ Return a structured report headed `# Review Report: {scope}` (where `{scope}` is
 
 Every finding is listed individually — never aggregate. If a section has no findings, include it with "None found."
 
+## Shell Safety (Windows)
+
+This project runs on Windows with Git Bash. All bash commands MUST follow the Shell Compatibility rules in `spec/.context/rules.md`. The critical points:
+- **Always double-quote all paths** in bash commands.
+- **Use forward slashes** in paths, never backslashes.
+- **Use `/dev/null`**, never `NUL`.
+- **Use Unix commands** (`ls`, `rm`, `mkdir`), never Windows commands (`dir`, `del`).
+
 ## Rules (reinforced)
 
 - You NEVER fix code. You investigate and report objectively.

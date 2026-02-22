@@ -44,8 +44,8 @@ Construct a lean orchestrator prompt using the **"implement-orchestrated → orc
 #### 2. Spawn Orchestrator
 
 Spawn a single orchestrator Task with:
-- **subagent_type**: `general-purpose`
-- **model**: `opus`
+- **subagent_type**: `claude-orchestrator:orchestrator`
+- **model**: `sonnet`
 - **prompt**: the constructed prompt above
 
 The orchestrator reads its own instructions from `spec/.context/orchestrator.md` and constructs lean implementer prompts that point back to `spec/.context/`.
@@ -69,7 +69,7 @@ After a wave completes, spawn a reviewer agent to audit the just-completed wave'
 Build a lean reviewer prompt using the **"implement-orchestrated → reviewer"** template from `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md`. Fill in wave/phase details and include the orchestrator's completion report. Do not embed agent instructions.
 
 Spawn the reviewer Task with:
-- **subagent_type**: `general-purpose`
+- **subagent_type**: `claude-orchestrator:reviewer`
 - **model**: `sonnet`
 - **prompt**: the constructed reviewer prompt above
 
@@ -117,6 +117,14 @@ You are a long-running coordinator. Every byte you read costs context that you n
 - **NEVER read full git diffs.** If you need to gauge the scope of changes, use `git diff --stat | wc -l` or `git diff --shortstat`. Never read the diff content itself.
 - **Rely on `spec/progress.md` for task status**, not on parsing agent output.
 - **Rely on the reviewer report for quality assessment**, not on reading implementation files yourself.
+
+## Shell Safety (Windows)
+
+This project runs on Windows with Git Bash. All bash commands (including the materialize script invocation) MUST:
+- **Double-quote all paths** — backslashes are escape characters in unquoted strings.
+- **Use forward slashes** in paths.
+- **Use `/dev/null`**, never `NUL`.
+- **Invoke scripts with `bash` explicitly** — `bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh"`, not `./scripts/materialize-context.sh`.
 
 ## Important
 

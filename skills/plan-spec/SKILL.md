@@ -101,6 +101,13 @@ Where `{n}` is the phase number and `{name}` is the phase name in kebab-case (lo
 
 Use the format from `${SKILL_DIR}/references/spec-template.md`.
 
+## Shell Safety (Windows)
+
+This project runs on Windows with Git Bash. All bash commands MUST:
+- **Double-quote all paths** — backslashes are escape characters in unquoted strings.
+- **Use forward slashes** in paths.
+- **Use `/dev/null`**, never `NUL`.
+
 ## Important
 
 - Tests must specify exact assertions, not vague "test that it works" statements.

@@ -123,6 +123,13 @@ If `spec/progress.md` doesn't exist, create it:
 Progress is recorded here by implementation agents. Each completed task appends its status below.
 ```
 
+## Shell Safety (Windows)
+
+This project runs on Windows with Git Bash. All bash commands MUST:
+- **Double-quote all paths** — backslashes are escape characters in unquoted strings.
+- **Use forward slashes** in paths.
+- **Use `/dev/null`**, never `NUL`.
+
 ## Important
 
 - Present design options in prose with tables for concrete tradeoff comparisons — never as bare structured interviews.

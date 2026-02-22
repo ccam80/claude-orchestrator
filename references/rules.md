@@ -24,6 +24,17 @@ These rules are absolute. No agent may override, soften, or interpret them flexi
 - Comments exist ONLY to explain complicated code to future developers. They never describe what was changed, what was removed, or historical behaviour.
 - No feature flags, no environment-variable toggles for old/new behaviour.
 
+## Shell Compatibility (Windows)
+
+This project runs on Windows with Git Bash. All bash commands MUST be Windows-safe:
+
+- **Always double-quote paths.** Backslashes are interpreted as escape characters in unquoted strings. Every path in every command must be wrapped in double quotes: `mkdir -p "spec/.locks/tasks"`, not `mkdir -p spec/.locks/tasks`.
+- **Use forward slashes in paths.** Write `"spec/.locks/files/src__main.py"`, not `"spec\.locks\files\src__main.py"`. Git Bash handles forward slashes natively. Backslashes require quoting and are fragile.
+- **Never use `NUL`** — use `/dev/null`.
+- **Never use Windows-native commands** (`dir`, `del`, `copy`, `type`, `findstr`). Use their Unix equivalents (`ls`, `rm`, `cp`, `cat`, `grep`).
+- **Quote variable expansions.** Write `"${TASK_ID}"` not `${TASK_ID}` when the value could contain spaces or special characters.
+- **Use `bash` explicitly when invoking scripts.** Write `bash "path/to/script.sh"`, not `./path/to/script.sh` or `sh "path/to/script.sh"`.
+
 ## Agent Discipline
 - Never soften, reinterpret, or "pragmatically adjust" these rules.
 - If a rule seems to conflict with the task, flag it to the orchestrator. Do not resolve the conflict yourself.

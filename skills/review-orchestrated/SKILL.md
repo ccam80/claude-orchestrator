@@ -34,7 +34,7 @@ From `spec/progress.md`, identify which phases have completed tasks. Group them 
 For each phase in scope, spawn one reviewer Task **in parallel**. Build a lean reviewer prompt using the **"review-orchestrated → reviewer"** template from `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md`. Fill in phase details. Do not embed agent instructions — the reviewer reads them from `spec/.context/`.
 
 Spawn each reviewer Task with:
-- **subagent_type**: `general-purpose`
+- **subagent_type**: `claude-orchestrator:reviewer`
 - **model**: `sonnet`
 - **prompt**: the constructed prompt above
 
@@ -132,6 +132,14 @@ You are a coordinator. Protect your context:
 - **Do not read implementation files yourself.** Rely on reviewer reports for quality information.
 - **Do not re-review after fixes.** The reviewer agents already identified the violations. Your fixes are mechanical removals — they don't need re-auditing.
 - Read `spec/progress.md` for file lists, not git diffs.
+
+## Shell Safety (Windows)
+
+This project runs on Windows with Git Bash. All bash commands (including the materialize script invocation) MUST:
+- **Double-quote all paths** — backslashes are escape characters in unquoted strings.
+- **Use forward slashes** in paths.
+- **Use `/dev/null`**, never `NUL`.
+- **Invoke scripts with `bash` explicitly** — `bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh"`, not `./scripts/materialize-context.sh`.
 
 ## Important
 
