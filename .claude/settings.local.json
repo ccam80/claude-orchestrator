@@ -4,7 +4,11 @@
       "Bash(chmod:*)",
       "Bash(xxd:*)",
       "Bash(bash \"C:/local_working_projects/claude-orchestrator/scripts/materialize-context.sh\" implement \"C:/local_working_projects/claude-orchestrator\" \"C:/tmp/test_materialize\")",
-      "Bash(bash \"C:/local_working_projects/claude-orchestrator/scripts/materialize-context.sh\" review \"C:/local_working_projects/claude-orchestrator\" \"C:/tmp/test_materialize\")"
+      "Bash(bash \"C:/local_working_projects/claude-orchestrator/scripts/materialize-context.sh\" review \"C:/local_working_projects/claude-orchestrator\" \"C:/tmp/test_materialize\")",
+      "Bash(node:*)",
+      "Bash(echo NOT_FOUND:*)",
+      "Bash(export:*)",
+      "Bash(head:*)"
     ]
   }
 }
