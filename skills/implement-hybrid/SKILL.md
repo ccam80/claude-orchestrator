@@ -46,6 +46,42 @@ Savings per wave:
    mkdir -p "spec/.locks/tasks" "spec/.locks/files"
    ```
 
+## Test Baseline
+
+Before spawning the first wave of implementers for each phase, capture the pre-existing test state. Spawn a lightweight background Task:
+
+- **subagent_type**: `general-purpose`
+- **model**: `haiku`
+- **run_in_background**: `true`
+- **description**: `"Capture test baseline"`
+
+Use this prompt:
+
+```markdown
+# Test Baseline Capture
+
+1. Read `CLAUDE.md` and `spec/plan.md` to find the project's test command.
+2. Run the full test suite.
+3. Write the results to `spec/test-baseline.md` in this format:
+
+\```markdown
+# Test Baseline
+- **Timestamp**: {ISO 8601}
+- **Phase**: {phase about to start}
+- **Command**: {test command used}
+- **Result**: {pass_count}/{total_count} passing, {fail_count} failing, {error_count} errors
+
+## Failing Tests (pre-existing)
+| Test | Status | Summary |
+|------|--------|---------|
+| {test_path::class::method} | FAIL/ERROR | {one-line summary} |
+\```
+
+If no test command is found, write that to the file and return. If tests cannot run (missing dependencies, etc.), document the error.
+```
+
+Wait for the baseline Task to complete via `TaskOutput(task_id, block=true)` before proceeding to wave execution. This ensures `spec/test-baseline.md` exists before any implementer reads it.
+
 ## Wave Execution
 
 ### Determine Order
@@ -103,6 +139,7 @@ Read these files before doing anything else:
 - `spec/.context/lock-protocol.md` — lock coordination protocol
 - `spec/phase-{n}-{name}.md` — find your task by ID for full specification
 - `CLAUDE.md` — project-specific rules and conventions
+- `spec/test-baseline.md` — pre-existing test failures (check before investigating any test failure)
 ```
 
 **Important**: The implementer's agent instructions are loaded automatically via the `claude-orchestrator:implementer` agent type. Do NOT add `spec/.context/implementer.md` to the context files list — it would be a redundant ~1,500 token read per agent.
@@ -114,8 +151,26 @@ After spawning all implementers in one message, call `TaskOutput(task_id, block=
 After all implementer Tasks return:
 1. Read `spec/progress.md` for updated status — this is the source of truth, not implementer reports.
 2. Check whether all tasks in the wave are complete.
-3. If all complete → proceed to step 7 (wave summary).
+3. If all complete → proceed to step 4a (commit), then step 7 (wave summary).
 4. If partial → proceed to step 5 (retry).
+
+#### 4a. Commit Wave
+
+After verifying `spec/progress.md` has been updated for this wave, commit all changes:
+
+```bash
+git add -A
+git commit -m "Wave {wave_id} implementation complete"
+```
+
+If the wave was only partially completed (after retries in step 5), use:
+
+```bash
+git add -A
+git commit -m "Wave {wave_id} partial — {n}/{total} tasks complete"
+```
+
+This preserves state between waves so that if a subsequent wave fails or context compresses, prior work is safely committed.
 
 #### 5. Handle Incomplete Tasks
 

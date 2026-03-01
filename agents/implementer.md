@@ -18,6 +18,7 @@ Before doing anything else, read these files in order:
 3. `spec/.context/lock-protocol.md` — lock protocol for parallel coordination
 4. The phase spec file identified in your assignment — find your task by ID for the full specification
 5. `CLAUDE.md` — project-specific rules and conventions
+6. `spec/test-baseline.md` — pre-existing test state (if it exists). Use this to distinguish pre-existing failures from regressions you introduced.
 
 ## Workflow
 
@@ -72,6 +73,9 @@ Execute the task exactly as specified:
 - Run tests and fix implementation until all pass.
 - Never modify test assertions to match broken implementation.
 - Never use pytest.skip(), pytest.xfail(), or soft assertions.
+- When a test fails, check `spec/test-baseline.md` before investigating:
+  - If the test was already failing in the baseline → pre-existing failure. Note it in your progress entry but do not block on it.
+  - If the test was passing in the baseline (or is a new test) → your change broke it. You must fix it.
 
 ### 5. Release File Locks
 
@@ -153,5 +157,6 @@ These are absolute. Do not violate them under any circumstances:
 - No TODO, FIXME, HACK comments. No pass or raise NotImplementedError.
 - No commented-out code. No backwards compatibility shims.
 - No historical-provenance comments. Never write comments describing what code replaced, what it used to do, or where it came from. If you feel the need to justify a change in a comment, that is a signal you have not implemented the new functionality cleanly.
+- Never use `git stash`, `git checkout`, `git reset`, or `git clean`. Pre-existing test state is in `spec/test-baseline.md`.
 - If you cannot finish a task, write detailed progress to spec/progress.md describing exactly what's done and what's next. Do not summarize.
 - If a rule conflicts with the task spec, note the conflict in your completion report. Do not resolve it yourself.

@@ -23,6 +23,42 @@ You are the top-level implementation coordinator. You read specs, spawn orchestr
    This copies all 5 agent/reference files to `spec/.context/` in a single command. Do NOT read the agent files yourself — the script handles it.
 7. If `$ARGUMENTS` specifies a phase, limit execution to that phase. Otherwise execute all phases in order.
 
+## Test Baseline
+
+Before spawning the first wave of implementers for each phase, capture the pre-existing test state. Spawn a lightweight background Task:
+
+- **subagent_type**: `general-purpose`
+- **model**: `haiku`
+- **run_in_background**: `true`
+- **description**: `"Capture test baseline"`
+
+Use this prompt:
+
+```markdown
+# Test Baseline Capture
+
+1. Read `CLAUDE.md` and `spec/plan.md` to find the project's test command.
+2. Run the full test suite.
+3. Write the results to `spec/test-baseline.md` in this format:
+
+\```markdown
+# Test Baseline
+- **Timestamp**: {ISO 8601}
+- **Phase**: {phase about to start}
+- **Command**: {test command used}
+- **Result**: {pass_count}/{total_count} passing, {fail_count} failing, {error_count} errors
+
+## Failing Tests (pre-existing)
+| Test | Status | Summary |
+|------|--------|---------|
+| {test_path::class::method} | FAIL/ERROR | {one-line summary} |
+\```
+
+If no test command is found, write that to the file and return. If tests cannot run (missing dependencies, etc.), document the error.
+```
+
+Wait for the baseline Task to complete via `TaskOutput(task_id, block=true)` before proceeding to wave execution. This ensures `spec/test-baseline.md` exists before any implementer reads it.
+
 ## Wave Execution
 
 ### Determine Order
@@ -58,12 +94,30 @@ The orchestrator reads its own instructions from `spec/.context/orchestrator.md`
 After the orchestrator Task returns:
 1. Read `spec/progress.md` for updated status.
 2. Check whether all tasks in the wave are complete.
-3. If all complete → proceed to review and next wave.
+3. If all complete → proceed to commit and review.
 4. If partial completion:
    - Report the status to the user.
    - Ask whether to retry incomplete tasks or skip them.
    - If retry → spawn another orchestrator for the remaining tasks.
    - If skip → note skipped tasks and proceed.
+
+#### 3a. Commit Wave
+
+After verifying `spec/progress.md` has been updated for this wave, commit all changes:
+
+```bash
+git add -A
+git commit -m "Wave {wave_id} implementation complete"
+```
+
+If the wave was only partially completed, use:
+
+```bash
+git add -A
+git commit -m "Wave {wave_id} partial — {n}/{total} tasks complete"
+```
+
+This preserves state between waves so that if a subsequent wave fails or context compresses, prior work is safely committed.
 
 #### 4. Spawn Reviewer (parallel with next wave)
 

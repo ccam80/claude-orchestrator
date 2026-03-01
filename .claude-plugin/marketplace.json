@@ -19,7 +19,8 @@
         "./skills/plan-spec",
         "./skills/implement-orchestrated",
         "./skills/implement-hybrid",
-        "./skills/review-orchestrated"
+        "./skills/review-orchestrated",
+        "./skills/review-spec"
       ]
     }
   ]

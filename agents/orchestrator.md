@@ -74,6 +74,7 @@ Read these files before doing anything else:
 - `spec/.context/lock-protocol.md` — lock protocol
 - `spec/phase-{n}-{name}.md` — full task specifications (find your task by ID)
 - `CLAUDE.md` — project-specific rules and conventions
+- `spec/test-baseline.md` — pre-existing test failures (check before investigating any test failure)
 ```
 
 ### 4. Monitor Completion
@@ -145,3 +146,4 @@ This project runs on Windows with Git Bash. All bash commands MUST follow the Sh
 - Clean up stale locks after every round of implementers, before spawning new ones.
 - Read progress.md after each round to get ground truth on what's done.
 - Your completion report is consumed by a context-constrained coordinator. Keep it structured and concise — use the report template exactly. Do not include implementation details, code snippets, or full file contents in your report.
+- Never use `git stash`, `git checkout`, `git reset`, or `git clean`. Pre-existing test state is in `spec/test-baseline.md`.

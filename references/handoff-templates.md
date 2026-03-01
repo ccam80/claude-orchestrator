@@ -30,6 +30,7 @@ Read these files before doing anything else:
 - `spec/phase-{n}-{name}.md` — full task specifications for this wave
 - `CLAUDE.md` — project-specific rules and conventions
 - `spec/progress.md` — current implementation status
+- `spec/test-baseline.md` — pre-existing test failures (pass to implementers in their prompts)
 ```
 
 ## orchestrator → implementer
@@ -56,6 +57,7 @@ Read these files before doing anything else:
 - `spec/.context/lock-protocol.md` — lock protocol
 - `spec/phase-{n}-{name}.md` — full task specifications (find your task by ID)
 - `CLAUDE.md` — project-specific rules and conventions
+- `spec/test-baseline.md` — pre-existing test failures (check before investigating any test failure)
 ```
 
 ## implement-orchestrated → reviewer
@@ -170,6 +172,54 @@ Read these files before doing anything else:
 
 ## Full Report
 `spec/reviews/phase-{n}.md`
+```
+
+## review-spec → review-spec agent
+
+```markdown
+# Spec Review Assignment
+
+## Project
+- **Root**: {project_dir}
+- **Spec Directory**: {project_dir}/spec
+
+## Review Scope: Phase {n} — {phase_name}
+- **Phase spec file**: spec/phase-{n}-{name}.md
+- **Plan file**: spec/plan.md
+
+## Report Path
+Write your full report to: `spec/reviews/spec-phase-{n}.md`
+
+## Context Files
+Read these files before doing anything else:
+- `spec/.context/review-spec.md` — your agent instructions
+- `spec/.context/rules.md` — implementation rules that specs must support
+- `spec/plan.md` — full plan (for plan coverage checks)
+- `spec/phase-{n}-{name}.md` — the phase spec to review
+- `CLAUDE.md` — project-specific rules and conventions
+```
+
+## review-spec agent → review-spec (return via Task result)
+
+```markdown
+# Spec Review Summary: Phase {n} — {name}
+
+## Verdict: ready | needs-revision
+
+## Tally
+| Dimension | Issues |
+|-----------|--------|
+| Plan coverage gaps | {n} |
+| Consistency issues | {n} |
+| Completeness gaps | {n} |
+| Concreteness issues | {n} |
+| Implementability concerns | {n} |
+
+## Critical Issues
+{Issues that would block implementation. If none, write "None."}
+
+## Full Report
+`spec/reviews/spec-phase-{n}.md`
 ```
 
 ## implementer → orchestrator (return via Task result)

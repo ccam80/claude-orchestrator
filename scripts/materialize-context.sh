@@ -25,6 +25,8 @@ elif [ "$mode" = "hybrid" ]; then
   # No orchestrator.md (eliminated) or implementer.md (loaded via agent type)
 elif [ "$mode" = "review" ]; then
   cp "${plugin_root}/agents/reviewer.md" "$dest/reviewer.md"
+elif [ "$mode" = "review-spec" ]; then
+  cp "${plugin_root}/agents/review-spec.md" "$dest/review-spec.md"
 else
   exit 1
 fi

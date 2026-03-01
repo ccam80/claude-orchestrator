@@ -1,0 +1,184 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1772399064328,
+  "projectRoot": "C:\\local_working_projects\\claude-orchestrator",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "scripts"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "agents": {
+      "path": "agents",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1772399064286,
+      "keyFiles": [
+        "implementer.md",
+        "orchestrator.md",
+        "reviewer.md"
+      ]
+    },
+    "references": {
+      "path": "references",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1772399064287,
+      "keyFiles": [
+        "handoff-templates.md",
+        "lock-protocol.md",
+        "rules.md"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 1,
+      "lastAccessed": 1772399064287,
+      "keyFiles": [
+        "materialize-context.sh"
+      ]
+    },
+    "skills": {
+      "path": "skills",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1772399064288,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "skills\\implement-hybrid\\SKILL.md",
+      "accessCount": 8,
+      "lastAccessed": 1772400879850,
+      "type": "file"
+    },
+    {
+      "path": "agents\\implementer.md",
+      "accessCount": 7,
+      "lastAccessed": 1772399848589,
+      "type": "file"
+    },
+    {
+      "path": "references\\handoff-templates.md",
+      "accessCount": 7,
+      "lastAccessed": 1772399869117,
+      "type": "file"
+    },
+    {
+      "path": "agents\\orchestrator.md",
+      "accessCount": 7,
+      "lastAccessed": 1772399922454,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 7,
+      "lastAccessed": 1772400353869,
+      "type": "directory"
+    },
+    {
+      "path": "skills\\implement-orchestrated\\SKILL.md",
+      "accessCount": 7,
+      "lastAccessed": 1772400878122,
+      "type": "file"
+    },
+    {
+      "path": "scripts\\materialize-context.sh",
+      "accessCount": 5,
+      "lastAccessed": 1772399755782,
+      "type": "file"
+    },
+    {
+      "path": "references\\rules.md",
+      "accessCount": 5,
+      "lastAccessed": 1772399758426,
+      "type": "file"
+    },
+    {
+      "path": "agents\\reviewer.md",
+      "accessCount": 5,
+      "lastAccessed": 1772399767983,
+      "type": "file"
+    },
+    {
+      "path": "skills\\review-orchestrated\\SKILL.md",
+      "accessCount": 4,
+      "lastAccessed": 1772399674753,
+      "type": "file"
+    },
+    {
+      "path": ".claude-plugin\\marketplace.json",
+      "accessCount": 4,
+      "lastAccessed": 1772399753432,
+      "type": "file"
+    },
+    {
+      "path": "skills\\plan-spec\\SKILL.md",
+      "accessCount": 3,
+      "lastAccessed": 1772399449704,
+      "type": "file"
+    },
+    {
+      "path": "references\\lock-protocol.md",
+      "accessCount": 2,
+      "lastAccessed": 1772399349108,
+      "type": "file"
+    },
+    {
+      "path": "skills\\plan-orchestrated\\SKILL.md",
+      "accessCount": 2,
+      "lastAccessed": 1772399379112,
+      "type": "file"
+    },
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 1,
+      "lastAccessed": 1772399349676,
+      "type": "file"
+    },
+    {
+      "path": "skills\\plan-spec\\references\\spec-template.md",
+      "accessCount": 1,
+      "lastAccessed": 1772399456223,
+      "type": "file"
+    },
+    {
+      "path": "agents\\review-spec.md",
+      "accessCount": 1,
+      "lastAccessed": 1772399752510,
+      "type": "file"
+    },
+    {
+      "path": "skills\\review-spec\\SKILL.md",
+      "accessCount": 1,
+      "lastAccessed": 1772399833937,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
