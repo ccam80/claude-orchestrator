@@ -2,6 +2,22 @@
 
 You are operating within the claude-orchestrator plugin. This plugin manages structured planning and parallel implementation of software features.
 
+## Skills and Agents
+
+### Skills (user-invocable)
+- **plan-orchestrated** — generate a high-level implementation plan with phases, waves, and verification measures
+- **plan-spec** — produce a detailed implementation spec for a single phase
+- **review-spec** — review phase specs for quality, consistency, and implementability before implementation
+- **implement-hybrid** — spawn implementers directly (2-level architecture, ~40-60% better context efficiency). **Recommended with oh-my-claudecode.**
+- **implement-orchestrated** — spawn orchestrator + implementer agents (3-level architecture). Works without oh-my-claudecode.
+- **review-orchestrated** — review completed implementation against specs and rules
+
+### Agents (spawned by skills)
+- **implementer** — executes tasks as specified, writes tests, self-continues to next task
+- **orchestrator** — manages a wave of implementers (used only by implement-orchestrated)
+- **reviewer** — audits implementation against specs and rules, reports findings
+- **review-spec** — audits a phase spec for coverage, consistency, completeness, concreteness, implementability
+
 ## Core Principles
 
 1. **Specs are current-state contracts.** They contain ONLY what to build. No decision history, no changelogs, no "previously we considered X." If a decision changes, the spec is updated in place — replaced, not appended.

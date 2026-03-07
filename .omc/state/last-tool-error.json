@@ -1,0 +1,7 @@
+{
+  "tool_name": "Read",
+  "tool_input_preview": "{\"file_path\":\"C:\\\\local_working_projects\\\\claude-orchestrator\\\\README.md\"}",
+  "error": "File does not exist. Note: your current working directory is C:\\local_working_projects\\claude-orchestrator.",
+  "timestamp": "2026-03-07T08:29:54.773Z",
+  "retry_count": 1
+}
