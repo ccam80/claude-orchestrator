@@ -45,6 +45,46 @@ Savings per wave:
    ```bash
    mkdir -p "spec/.locks/tasks" "spec/.locks/files"
    ```
+9. Initialize the state file to signal the first wave is clear to start:
+   ```json
+   {
+     "phase": "{first_phase_id}",
+     "wave": null,
+     "completed_waves": [],
+     "status": "verified",
+     "verified": true,
+     "verification": null,
+     "last_updated": "{ISO 8601}"
+   }
+   ```
+   Write this to `spec/.hybrid-state.json`.
+
+### Verification Gate Hook
+
+This plugin includes a PreToolUse hook (`scripts/verify-wave-gate.sh`) that acts as a hard safety net. It blocks implementer agent spawns whenever `spec/.hybrid-state.json` shows an unverified wave. This catches the coordinator even after context compression.
+
+Register this hook in the consuming project's `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/verify-wave-gate.sh\""
+      }
+    ]
+  }
+}
+```
+
+**State machine** enforced by the hook and the coordinator:
+```
+verified ──→ implementing ──→ wave_complete ──→ verifying ──→ verified ──→ (next wave)
+                                                          └─→ failed ──→ fixing ──→ verifying …
+```
+
+Only `verified` and `implementing` states allow new implementer spawns. All other states block.
 
 ## Test Baseline
 
@@ -108,6 +148,12 @@ If all tasks in the wave are complete, skip to the next wave.
 - Assign one task per implementer as their starting task. Include the full available task list so they can self-continue to additional tasks.
 
 #### 3. Spawn Implementers
+
+First, update state to `implementing`:
+```json
+{ "status": "implementing", "verified": false }
+```
+Write this to `spec/.hybrid-state.json` (merge with existing fields). This signals to the verification gate hook that a wave is actively running.
 
 Spawn ALL implementers **in a single message** as background Tasks:
 
@@ -195,7 +241,7 @@ After all tasks complete (or max retries reached):
 rm -rf "spec/.locks/tasks/"* "spec/.locks/files/"* 2>/dev/null
 ```
 
-#### 7. Write Wave Summary
+#### 7. Write Wave Summary and Update State → `wave_complete`
 
 Append to `spec/progress.md` (NEVER overwrite — always append):
 
@@ -207,7 +253,29 @@ Append to `spec/progress.md` (NEVER overwrite — always append):
 - **Rounds**: {round_count}
 ```
 
-#### 8. Spawn Reviewer
+Then **immediately** update `spec/.hybrid-state.json`:
+
+```json
+{
+  "phase": "{current_phase_id}",
+  "wave": "{completed_wave_id}",
+  "completed_waves": ["X.1", "X.2"],
+  "status": "wave_complete",
+  "verified": false,
+  "verification": null,
+  "last_updated": "{ISO 8601}"
+}
+```
+
+**This state blocks new implementer spawns via the verification gate hook.** The next wave cannot start until verification completes and the state transitions to `verified`.
+
+#### 8. Spawn Reviewer (blocking)
+
+Update state to `verifying`, then spawn the reviewer:
+
+```json
+{ "status": "verifying", "verified": false }
+```
 
 Build a reviewer prompt and spawn as a background Task:
 
@@ -243,35 +311,94 @@ Read these files before doing anything else:
 - `spec/progress.md` — implementation status (source of truth for file lists)
 ```
 
-**Parallel execution**: If there is a next wave to execute, spawn the next wave's implementers **in the same message** as the reviewer (all as background Tasks). Then `TaskOutput` the implementers first (you need their results to proceed). Collect the reviewer's `TaskOutput` when convenient — before phase completion at latest.
+**Wait for the reviewer to complete** via `TaskOutput(task_id, block=true)`. Do NOT spawn the next wave's implementers in parallel with the reviewer.
 
-#### 9. Handle Review Results
+#### 9. Run Verification Tests
 
-When the reviewer's `TaskOutput` returns its lean summary:
-- If **clean** → note and continue.
-- If **has-violations**:
-  - Check the **Critical Findings** section.
-  - If critical findings block the next wave → present to user, ask whether to fix before continuing. If fixes needed, spawn a targeted implementer for the fix tasks.
-  - For non-critical findings → note tallies. Do NOT present individual findings during wave execution.
-  - Display: `"Wave {wave_id} review: {verdict} — {critical} critical, {major} major, {minor} minor, {gaps} gaps. Full report: spec/reviews/wave-{wave_id}.md"`
+After the reviewer returns, run the project's test suite:
 
-Do NOT attempt to review code yourself. Do NOT read the full review report files during wave execution.
+```bash
+# Use the test command from CLAUDE.md / spec/plan.md
+{test_command}
+```
 
-#### 10. Update State
+Capture the result: pass count, fail count, and whether any new failures appeared compared to `spec/test-baseline.md`.
 
-Write recovery state after each wave:
+#### 10. Evaluate Verification Gate
+
+Collect three signals:
+1. **Reviewer verdict**: from the lean summary (`clean` or `has-violations`)
+2. **Critical findings count**: from the lean summary's Critical Findings section
+3. **Test result**: pass/fail, any regressions vs baseline
+
+**Gate decision**:
+
+| Reviewer | Critical | Tests | Decision |
+|----------|----------|-------|----------|
+| clean | 0 | pass | **PASS** → step 11 |
+| has-violations | 0 | pass | **PASS** → step 11 (non-critical findings deferred to phase review) |
+| any | >0 | any | **FAIL** → step 10a |
+| any | any | regression | **FAIL** → step 10a |
+
+Display: `"Wave {wave_id} verification: {PASS|FAIL} — reviewer: {verdict}, critical: {n}, tests: {pass}/{total} ({n} regressions). Full report: spec/reviews/wave-{wave_id}.md"`
+
+#### 10a. Handle Verification Failure (fix loop)
+
+If the gate fails, enter the fix loop (max 2 rounds):
+
+1. Update state:
+   ```json
+   { "status": "failed", "verified": false, "verification": { "reviewer_verdict": "...", "critical_findings": N, "test_regressions": N } }
+   ```
+
+2. **For critical review findings**: read ONLY the Critical Findings section from the reviewer's lean summary. Build targeted fix tasks.
+
+3. **For test regressions**: identify which tests regressed vs baseline. Build targeted fix tasks.
+
+4. Update state to `fixing`:
+   ```json
+   { "status": "fixing", "verified": false }
+   ```
+
+5. Spawn fix agents as background Tasks:
+   - **subagent_type**: `claude-orchestrator:implementer`
+   - **model**: `sonnet`
+   - **run_in_background**: `true`
+   - **description**: `"Fix-verify {wave_id} round {n}"` (the `fix-verify` prefix lets the hook distinguish fix agents from next-wave implementers — **the hook allows `fix-verify` spawns in any state**)
+
+   Use the same implementer prompt template, but replace the task list with the specific fix tasks. Include the reviewer's critical findings and/or failing test names in the prompt.
+
+6. Wait for fix agents via `TaskOutput(block=true)`.
+
+7. Re-run verification: spawn a new reviewer for the wave (same template) and re-run tests. Evaluate the gate again.
+
+8. If still failing after 2 fix rounds → report to user with the critical findings and test failures. Ask how to proceed. Do NOT continue to the next wave.
+
+#### 11. Mark Verified and Proceed
+
+Update state to `verified`:
 
 ```json
 {
   "phase": "{current_phase_id}",
   "wave": "{completed_wave_id}",
-  "completed_waves": ["E.1", "E.2"],
-  "status": "in_progress",
+  "completed_waves": ["X.1", "X.2"],
+  "status": "verified",
+  "verified": true,
+  "verification": {
+    "reviewer_verdict": "{clean|has-violations}",
+    "critical_findings": 0,
+    "tests_passed": true,
+    "test_regressions": 0,
+    "fix_rounds": 0
+  },
   "last_updated": "{ISO 8601}"
 }
 ```
 
-Write this to `spec/.hybrid-state.json` using the Write tool.
+**Only now** may you proceed to the next wave (back to step 1 for the next wave). The hook will allow implementer spawns in this state.
+
+Do NOT attempt to review code yourself. Do NOT read the full review report files during wave execution — the lean summary is sufficient. Full reports are consumed at phase completion.
 
 ### Phase Completion
 
@@ -350,7 +477,13 @@ You are a long-running coordinator. Protect your context aggressively:
 - **Never read review report files during wave execution.** The lean summary is your sole source of quality information per wave. Read full reports only at phase completion for the combined review.
 - **Read phase spec files once per phase**, not per wave. The spec is the same for all waves in a phase.
 - **Read progress.md for current state** — scan for task completion markers, don't parse the full history.
-- **State file enables recovery.** If context compresses mid-execution, re-read `spec/.hybrid-state.json` and `spec/progress.md` to determine exactly where to resume. You do not need to re-read prior wave results.
+- **State file enables recovery.** If context compresses mid-execution, re-read `spec/.hybrid-state.json` and `spec/progress.md` to determine exactly where to resume. You do not need to re-read prior wave results. The state file's `status` field tells you exactly what to do next:
+  - `implementing` → implementers are running; wait for them (or check if they've already returned via progress.md).
+  - `wave_complete` → implementation done but not verified; go to step 8 (spawn reviewer).
+  - `verifying` → reviewer is running; wait for it (or check if review file exists).
+  - `failed` → verification failed; go to step 10a (fix loop).
+  - `fixing` → fix agents are running; wait for them.
+  - `verified` → safe to proceed to next wave; go to step 1 for the next wave.
 
 ## Error Handling
 
@@ -370,7 +503,7 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 
 ## Important
 
-- Run the materialize script during setup (step 7). Implementer prompts are lean pointers to `spec/.context/` files.
+- Run the materialize script during setup (Setup step 7). Implementer prompts are lean pointers to `spec/.context/` files.
 - Do not implement tasks yourself. Your job is to coordinate.
 - Do not review code yourself. Spawn the reviewer agent.
 - The `claude-orchestrator:implementer` agent type provides full implementer instructions automatically. Do not redundantly point implementers to `spec/.context/implementer.md`.

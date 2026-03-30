@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1772872124959,
+  "lastScanned": 1774841901079,
   "projectRoot": "C:\\local_working_projects\\claude-orchestrator",
   "techStack": {
     "languages": [],
@@ -27,7 +27,10 @@
     "mainDirectories": [
       "scripts"
     ],
-    "gitBranches": null
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
   },
   "customNotes": [],
   "directoryMap": {
@@ -35,7 +38,7 @@
       "path": "agents",
       "purpose": null,
       "fileCount": 4,
-      "lastAccessed": 1772872124933,
+      "lastAccessed": 1774841901056,
       "keyFiles": [
         "implementer.md",
         "orchestrator.md",
@@ -47,7 +50,7 @@
       "path": "references",
       "purpose": null,
       "fileCount": 3,
-      "lastAccessed": 1772872124934,
+      "lastAccessed": 1774841901056,
       "keyFiles": [
         "handoff-templates.md",
         "lock-protocol.md",
@@ -58,7 +61,7 @@
       "path": "scripts",
       "purpose": "Build/utility scripts",
       "fileCount": 1,
-      "lastAccessed": 1772872124934,
+      "lastAccessed": 1774841901056,
       "keyFiles": [
         "materialize-context.sh"
       ]
@@ -67,81 +70,69 @@
       "path": "skills",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1772872124934,
+      "lastAccessed": 1774841901057,
       "keyFiles": []
     }
   },
   "hotPaths": [
     {
-      "path": "CLAUDE.md",
-      "accessCount": 3,
-      "lastAccessed": 1772872272124,
-      "type": "file"
-    },
-    {
-      "path": "skills\\implement-orchestrated\\SKILL.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872207870,
-      "type": "file"
-    },
-    {
       "path": "skills\\implement-hybrid\\SKILL.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872209566,
+      "accessCount": 12,
+      "lastAccessed": 1774843635886,
       "type": "file"
     },
     {
-      "path": "skills\\plan-orchestrated\\SKILL.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872209815,
-      "type": "file"
-    },
-    {
-      "path": "skills\\plan-spec\\SKILL.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872210040,
-      "type": "file"
-    },
-    {
-      "path": "skills\\review-orchestrated\\SKILL.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872210095,
-      "type": "file"
-    },
-    {
-      "path": "skills\\review-spec\\SKILL.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872210113,
+      "path": "scripts\\verify-wave-gate.sh",
+      "accessCount": 4,
+      "lastAccessed": 1774843551598,
       "type": "file"
     },
     {
       "path": "agents\\implementer.md",
       "accessCount": 1,
-      "lastAccessed": 1772872214390,
+      "lastAccessed": 1774842010951,
+      "type": "file"
+    },
+    {
+      "path": "references\\rules.md",
+      "accessCount": 1,
+      "lastAccessed": 1774842010983,
+      "type": "file"
+    },
+    {
+      "path": "skills\\plan-orchestrated\\references\\plan-template.md",
+      "accessCount": 1,
+      "lastAccessed": 1774842017238,
+      "type": "file"
+    },
+    {
+      "path": "skills\\plan-spec\\references\\spec-template.md",
+      "accessCount": 1,
+      "lastAccessed": 1774842017725,
       "type": "file"
     },
     {
       "path": "agents\\orchestrator.md",
       "accessCount": 1,
-      "lastAccessed": 1772872214894,
+      "lastAccessed": 1774842018070,
+      "type": "file"
+    },
+    {
+      "path": ".claude\\settings.local.json",
+      "accessCount": 1,
+      "lastAccessed": 1774843115442,
+      "type": "file"
+    },
+    {
+      "path": "scripts\\materialize-context.sh",
+      "accessCount": 1,
+      "lastAccessed": 1774843115583,
       "type": "file"
     },
     {
       "path": "agents\\reviewer.md",
       "accessCount": 1,
-      "lastAccessed": 1772872215370,
-      "type": "file"
-    },
-    {
-      "path": "agents\\review-spec.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872215569,
-      "type": "file"
-    },
-    {
-      "path": "README.md",
-      "accessCount": 1,
-      "lastAccessed": 1772872261772,
+      "lastAccessed": 1774843119661,
       "type": "file"
     }
   ],
