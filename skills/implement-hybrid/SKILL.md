@@ -8,37 +8,98 @@ hooks:
     - matcher: "Agent"
       hooks:
         - type: command
-          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/verify-wave-gate.sh\""
+          if: "Agent(claude-orchestrator:implementer)"
+          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-implementer.sh\""
+  PostToolUse:
+    - matcher: "Agent"
+      hooks:
+        - type: command
+          if: "Agent(claude-orchestrator:wave-verifier)"
+          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mark-verified.sh\""
 ---
 
 # Implement Hybrid
 
-You are the implementation coordinator. You read specs, spawn implementer agents directly per wave, track progress via state files, and coordinate reviews. This eliminates the orchestrator middle layer for ~40-60% better context efficiency.
+You are the implementation coordinator. You read specs, spawn implementer agents directly per batch, track progress via state files, and coordinate verification. This eliminates the orchestrator middle layer for ~40-60% better context efficiency.
 
-## Architecture: How This Differs from implement-orchestrated
+## Architecture
 
 ```
 implement-orchestrated (3 levels):        implement-hybrid (2 levels):
   coordinator                               coordinator (you)
     └─ orchestrator  ← ELIMINATED             └─ implementers (direct)
-         └─ implementers                      └─ reviewer
+         └─ implementers                      └─ wave-verifier
     └─ reviewer
 ```
 
-Savings per wave:
-- No orchestrator setup (~4,700 tokens of agent file reads)
-- No orchestrator monitoring context (~1,500 tokens per implementer round)
-- Lighter materialization (3 files instead of 5)
-- No handoff-templates.md read (templates are inline below)
-- State-based recovery eliminates re-reading everything after context compression
+## Verification Gate System
+
+This skill uses a hook-enforced verification gate. You **cannot** bypass it — the hooks control the `verified` flag, not you.
+
+**Two hooks registered via frontmatter:**
+
+1. **PreToolUse on `claude-orchestrator:implementer`** — `gate-implementer.sh` blocks implementer spawns if any batch exists with `verified=false` and is not currently implementing. This catches you even after context compression.
+
+2. **PostToolUse on `claude-orchestrator:wave-verifier`** — `mark-verified.sh` parses the verifier's output. Sets `verified=true` ONLY if the verifier returned `## Verdict: PASS`. On FAIL, sets `status=failed` and injects instructions.
+
+**You cannot write `verified=true` yourself.** Only the PostToolUse hook can do this, and only when the wave-verifier returns PASS. Your job is to spawn the verifier after each batch completes.
+
+### Batch State
+
+The state file `spec/.hybrid-state.json` tracks batches, not individual waves:
+
+```json
+{
+  "phase": "1",
+  "batches": [
+    {
+      "id": "batch-1",
+      "waves": ["1.1", "1.2"],
+      "tasks": ["T1.1a", "T1.1b", "T1.2a"],
+      "status": "verified",
+      "verified": true
+    },
+    {
+      "id": "batch-2",
+      "waves": ["1.3"],
+      "tasks": ["T1.3a", "T1.3b"],
+      "status": "implementing",
+      "verified": false
+    }
+  ],
+  "last_updated": "2026-04-09T03:00:00Z"
+}
+```
+
+A **batch** is one spawn group — all waves/tasks the spec says can run in parallel. Sequential waves each get their own batch. Parallel waves share a batch.
+
+**Batch statuses:**
+- `implementing` — implementers are running (gate allows more implementers for this batch)
+- `implemented` — all implementers returned, awaiting verification (gate blocks new batches)
+- `verifying` — wave-verifier is running (gate blocks new batches)
+- `verified` — verifier returned PASS, hook set `verified=true` (gate allows new batches)
+- `failed` — verifier returned FAIL, hook set `status=failed` (gate blocks new batches)
+
+**Gate rule:** block new implementer spawns if ANY batch has `verified=false` AND `status != "implementing"`.
+
+### If the Hook Blocks You
+
+If you see a `BLOCKED:` message from the gate hook, you skipped verification. Do this:
+
+1. Read `spec/.hybrid-state.json` to find the unverified batch.
+2. If `status=implemented` — you need to spawn the wave-verifier (step 7).
+3. If `status=failed` — read the verifier's Failure Summary, spawn fix agents, then re-verify (step 8).
+4. If `status=verifying` — the verifier is still running. Wait for it via `TaskOutput(block=true)`.
+
+Do NOT attempt to write `verified=true` yourself — the Write tool will succeed but the hook checks the verifier's actual output, and the next implementer spawn will be blocked because no verifier PASS occurred.
 
 ## Setup
 
 1. Determine the project root directory (current working directory).
-2. Read `spec/plan.md` — specifically the phase dependency graph and wave structure. Note phase order, wave sequences, and task complexities.
+2. Read `spec/plan.md` — specifically the phase dependency graph and wave structure. Note phase order, wave sequences, and task complexities. Identify which waves can run in parallel.
 3. If `$ARGUMENTS` specifies a phase, limit execution to that phase. Otherwise execute all incomplete phases in dependency order.
 4. Check for recovery state:
-   - If `spec/.hybrid-state.json` exists, read it — resume from last incomplete wave.
+   - If `spec/.hybrid-state.json` exists, read it — resume from the last incomplete batch.
    - Otherwise read `spec/progress.md` to determine what's already complete.
 5. Read the phase spec file for the **first incomplete phase only** — not all specs. Read subsequent phase specs only when you reach them.
 6. Read the project's `CLAUDE.md` for project-specific rules.
@@ -46,40 +107,24 @@ Savings per wave:
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" hybrid "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
    ```
-   This copies 3 files to `spec/.context/`: rules.md, lock-protocol.md, reviewer.md.
+   This copies shared context files to `spec/.context/`.
 8. Initialize lock directories:
    ```bash
    mkdir -p "spec/.locks/tasks" "spec/.locks/files"
    ```
-9. Initialize the state file to signal the first wave is clear to start:
+9. Initialize the state file with an empty batches array:
    ```json
    {
      "phase": "{first_phase_id}",
-     "wave": null,
-     "completed_waves": [],
-     "status": "verified",
-     "verified": true,
-     "verification": null,
+     "batches": [],
      "last_updated": "{ISO 8601}"
    }
    ```
    Write this to `spec/.hybrid-state.json`.
 
-### Verification Gate Hook
-
-This skill registers a PreToolUse hook (`scripts/verify-wave-gate.sh`) via frontmatter — it fires automatically during implement-hybrid execution only. No manual registration needed. The hook blocks implementer agent spawns whenever `spec/.hybrid-state.json` shows an unverified wave, catching the coordinator even after context compression.
-
-**State machine** enforced by the hook and the coordinator:
-```
-verified ──→ implementing ──→ wave_complete ──→ verifying ──→ verified ──→ (next wave)
-                                                          └─→ failed ──→ fixing ──→ verifying …
-```
-
-Only `verified` and `implementing` states allow new implementer spawns. All other states block.
-
 ## Test Baseline
 
-Before spawning the first wave of implementers for each phase, capture the pre-existing test state. Spawn a lightweight background Task:
+Before spawning the first batch of implementers for each phase, capture the pre-existing test state. Spawn a lightweight background Task:
 
 - **subagent_type**: `general-purpose`
 - **model**: `haiku`
@@ -111,40 +156,49 @@ Use this prompt:
 If no test command is found, write that to the file and return. If tests cannot run (missing dependencies, etc.), document the error.
 ```
 
-Wait for the baseline Task to complete via `TaskOutput(task_id, block=true)` before proceeding to wave execution. This ensures `spec/test-baseline.md` exists before any implementer reads it.
+Wait for the baseline Task to complete via `TaskOutput(task_id, block=true)` before proceeding to batch execution. This ensures `spec/test-baseline.md` exists before any implementer reads it.
 
-## Wave Execution
+## Batch Execution
 
-### Determine Order
+### Determine Batches
 
-- Phases execute in dependency order (from `spec/plan.md` dependency graph).
-- Waves within a phase execute sequentially (Wave X.1 before X.2) unless the spec explicitly marks them as parallelizable.
+From the phase spec and `spec/plan.md`:
+- Identify which waves can run in parallel (the spec marks these explicitly).
+- Group parallel waves into a single **batch**.
+- Sequential waves each get their own batch.
+- Batches execute in order. Within a batch, all waves run concurrently.
 - Skip waves/tasks already marked complete in `spec/progress.md`.
 
-### For Each Wave
+### For Each Batch
 
-#### 1. Extract Tasks
+#### 1. Plan the Batch
 
-Read the phase spec file and identify tasks in the current wave. For each task, note:
-- Task ID, title, and complexity (S/M/L)
+Identify all tasks across all waves in this batch. For each task, note:
+- Task ID, title, complexity (S/M/L), and which wave it belongs to.
 
 Filter out tasks already marked complete in `spec/progress.md`.
 
-If all tasks in the wave are complete, skip to the next wave.
+If all tasks in the batch are complete, skip to the next batch.
 
-#### 2. Determine Parallelism
+#### 2. Create State Entry
 
-- Count remaining tasks in the wave.
-- Set implementer count: `min(remaining_tasks, 4)`.
-- Assign one task per implementer as their starting task. Include the full available task list so they can self-continue to additional tasks.
+Add a new batch entry to `spec/.hybrid-state.json`:
+
+```json
+{
+  "id": "batch-{n}",
+  "waves": ["X.1", "X.2"],
+  "tasks": ["TX.1a", "TX.1b", "TX.2a"],
+  "status": "implementing",
+  "verified": false
+}
+```
+
+Append this to the `batches` array. The `implementing` status signals to the gate that this batch is in-flight.
 
 #### 3. Spawn Implementers
 
-First, update state to `implementing`:
-```json
-{ "status": "implementing", "verified": false }
-```
-Write this to `spec/.hybrid-state.json` (merge with existing fields). This signals to the verification gate hook that a wave is actively running.
+Determine parallelism: `min(remaining_tasks, 4)` implementers. Assign one task per implementer as their starting task. Include the full available task list so they can self-continue.
 
 Spawn ALL implementers **in a single message** as background Tasks:
 
@@ -168,7 +222,7 @@ Use this prompt template for each implementer:
 ## Available Tasks (for self-continuation)
 | ID | Title | Complexity |
 |----|-------|------------|
-{remaining tasks in wave, excluding tasks assigned to other implementers as first tasks}
+{remaining tasks in batch, excluding tasks assigned to other implementers as first tasks}
 
 ## Context Files
 Read these files before doing anything else:
@@ -179,45 +233,23 @@ Read these files before doing anything else:
 - `spec/test-baseline.md` — pre-existing test failures (check before investigating any test failure)
 ```
 
-**Important**: The implementer's agent instructions are loaded automatically via the `claude-orchestrator:implementer` agent type. Do NOT add `spec/.context/implementer.md` to the context files list — it would be a redundant ~1,500 token read per agent.
-
 After spawning all implementers in one message, call `TaskOutput(task_id, block=true)` for each in a follow-up message.
 
 #### 4. Process Results
 
 After all implementer Tasks return:
 1. Read `spec/progress.md` for updated status — this is the source of truth, not implementer reports.
-2. Check whether all tasks in the wave are complete.
-3. If all complete → proceed to step 4a (commit), then step 7 (wave summary).
-4. If partial → proceed to step 5 (retry).
+2. Check whether all tasks in the batch are complete.
+3. If all complete → proceed to step 5 (commit), then step 6 (batch summary).
+4. If partial → proceed to step 4a (retry).
 
-#### 4a. Commit Wave
-
-After verifying `spec/progress.md` has been updated for this wave, commit all changes:
-
-```bash
-git add -A
-git commit -m "Wave {wave_id} implementation complete"
-```
-
-If the wave was only partially completed (after retries in step 5), use:
-
-```bash
-git add -A
-git commit -m "Wave {wave_id} partial — {n}/{total} tasks complete"
-```
-
-This preserves state between waves so that if a subsequent wave fails or context compresses, prior work is safely committed.
-
-#### 5. Handle Incomplete Tasks
+#### 4a. Handle Incomplete Tasks
 
 If tasks remain incomplete after all implementers return:
 
-1. Clean stale locks (locks left by returned implementers):
+1. Clean stale locks:
    ```bash
-   # Check for remaining task locks
    ls "spec/.locks/tasks/" 2>/dev/null
-   # Remove locks for tasks whose implementer has returned
    rm -rf "spec/.locks/tasks/{task_id}"
    ```
 2. Re-read `spec/progress.md` to identify which tasks still need work.
@@ -225,231 +257,153 @@ If tasks remain incomplete after all implementers return:
 4. Repeat until all tasks complete or max retries (3 rounds) reached.
 5. If tasks still incomplete after 3 rounds: report to the user and ask how to proceed.
 
-#### 6. Clean All Wave Locks
+#### 5. Commit Batch
 
-After all tasks complete (or max retries reached):
+After verifying `spec/progress.md` has been updated for this batch, commit all changes:
+
+```bash
+git add -A
+git commit -m "Batch {batch_id} implementation complete — waves {wave_list}"
+```
+
+If partial (after retries):
+
+```bash
+git add -A
+git commit -m "Batch {batch_id} partial — {n}/{total} tasks complete"
+```
+
+#### 6. Update State → `implemented`
+
+Clean locks and append batch summary to `spec/progress.md`:
+
 ```bash
 rm -rf "spec/.locks/tasks/"* "spec/.locks/files/"* 2>/dev/null
 ```
 
-#### 7. Write Wave Summary and Update State → `wave_complete`
-
-Append to `spec/progress.md` (NEVER overwrite — always append):
-
 ```markdown
 ---
-## Wave {wave_id} Summary
+## Batch {batch_id} Summary (waves: {wave_list})
 - **Status**: complete | partial
 - **Tasks completed**: {count}/{total}
 - **Rounds**: {round_count}
 ```
 
-Then **immediately** update `spec/.hybrid-state.json`:
+Update the batch entry in `spec/.hybrid-state.json`:
 
 ```json
-{
-  "phase": "{current_phase_id}",
-  "wave": "{completed_wave_id}",
-  "completed_waves": ["X.1", "X.2"],
-  "status": "wave_complete",
-  "verified": false,
-  "verification": null,
-  "last_updated": "{ISO 8601}"
-}
+{ "status": "implemented", "verified": false }
 ```
 
-**This state blocks new implementer spawns via the verification gate hook.** The next wave cannot start until verification completes and the state transitions to `verified`.
+**This state blocks new implementer spawns via the gate hook.** You must now verify this batch before starting the next one.
 
-#### 8. Spawn Reviewer (blocking)
+#### 7. Spawn Wave Verifier
 
-Update state to `verifying`, then spawn the reviewer:
+Update the batch status to `verifying`:
 
 ```json
 { "status": "verifying", "verified": false }
 ```
 
-Build a reviewer prompt and spawn as a background Task:
+Spawn the wave-verifier as a background Task:
 
-- **subagent_type**: `claude-orchestrator:reviewer`
+- **subagent_type**: `claude-orchestrator:wave-verifier`
 - **model**: `sonnet`
 - **run_in_background**: `true`
+- **description**: `"Verify batch {batch_id}"`
 
 Use this prompt template:
 
 ```markdown
-# Wave Review Assignment
+# Wave Verification Assignment
 
 ## Project
 - **Root**: {project_dir}
 - **Spec Directory**: {project_dir}/spec
 
-## Wave {wave_id}: {wave_name} (just completed)
+## Batch: {batch_id}
 - **Phase**: {phase_name}
 - **Phase spec file**: spec/phase-{n}-{name}.md
+- **Waves**: {wave_list}
+- **Tasks**: {task_id_list}
 
-## Wave Completion Report
-{lean summary: task IDs, statuses, test counts from step 4}
-
-## Report Path
-Write your full report to: `spec/reviews/wave-{wave_id}.md`
+## Test Command
+{test_command from CLAUDE.md or spec/plan.md}
 
 ## Context Files
 Read these files before doing anything else:
-- `spec/.context/reviewer.md` — your agent instructions
+- `spec/phase-{n}-{name}.md` — task specifications (find each task by ID)
 - `spec/.context/rules.md` — implementation rules to check against
-- `spec/phase-{n}-{name}.md` — task specifications for the reviewed wave
 - `CLAUDE.md` — project-specific rules and conventions
 - `spec/progress.md` — implementation status (source of truth for file lists)
+- `spec/test-baseline.md` — pre-existing test failures
 ```
 
-**Wait for the reviewer to complete** via `TaskOutput(task_id, block=true)`. Do NOT spawn the next wave's implementers in parallel with the reviewer.
+**Wait for the verifier to complete** via `TaskOutput(task_id, block=true)`.
 
-#### 9. Run Verification Tests
+The PostToolUse hook will fire automatically after the verifier returns:
+- If verifier returned **PASS** → hook sets `verified=true`, `status=verified`. You will see `"hook success: Wave verification PASSED"`. Proceed to the next batch.
+- If verifier returned **FAIL** → hook sets `status=failed`. You will see `"hook success: Wave verification FAILED"`. Go to step 8.
 
-After the reviewer returns, run the project's test suite:
+Display: `"Batch {batch_id} verification: {PASS|FAIL}"`
 
-```bash
-# Use the test command from CLAUDE.md / spec/plan.md
-{test_command}
-```
+#### 8. Handle Verification Failure (fix loop)
 
-Capture the result: pass count, fail count, and whether any new failures appeared compared to `spec/test-baseline.md`.
+If the verifier returned FAIL, enter the fix loop (max 2 rounds):
 
-#### 10. Evaluate Verification Gate
+1. Read the verifier's output — specifically the **Failure Summary** section. This lists every reason for failure (missing spec elements, rule violations, test regressions).
 
-Collect three signals:
-1. **Reviewer verdict**: from the lean summary (`clean` or `has-violations`)
-2. **Critical findings count**: from the lean summary's Critical Findings section
-3. **Test result**: pass/fail, any regressions vs baseline
+2. Build targeted fix tasks from the failure reasons.
 
-**Gate decision**:
-
-| Reviewer | Critical | Tests | Decision |
-|----------|----------|-------|----------|
-| clean | 0 | pass | **PASS** → step 11 |
-| has-violations | 0 | pass | **PASS** → step 11 (non-critical findings deferred to phase review) |
-| any | >0 | any | **FAIL** → step 10a |
-| any | any | regression | **FAIL** → step 10a |
-
-Display: `"Wave {wave_id} verification: {PASS|FAIL} — reviewer: {verdict}, critical: {n}, tests: {pass}/{total} ({n} regressions). Full report: spec/reviews/wave-{wave_id}.md"`
-
-#### 10a. Handle Verification Failure (fix loop)
-
-If the gate fails, enter the fix loop (max 2 rounds):
-
-1. Update state:
-   ```json
-   { "status": "failed", "verified": false, "verification": { "reviewer_verdict": "...", "critical_findings": N, "test_regressions": N } }
-   ```
-
-2. **For critical review findings**: read ONLY the Critical Findings section from the reviewer's lean summary. Build targeted fix tasks.
-
-3. **For test regressions**: identify which tests regressed vs baseline. Build targeted fix tasks.
-
-4. Update state to `fixing`:
-   ```json
-   { "status": "fixing", "verified": false }
-   ```
-
-5. Spawn fix agents as background Tasks:
+3. Spawn fix agents as background Tasks:
    - **subagent_type**: `claude-orchestrator:implementer`
    - **model**: `sonnet`
    - **run_in_background**: `true`
-   - **description**: `"Fix-verify {wave_id} round {n}"` (the `fix-verify` prefix lets the hook distinguish fix agents from next-wave implementers — **the hook allows `fix-verify` spawns in any state**)
+   - **description**: `"Fix batch {batch_id} round {n}"`
 
-   Use the same implementer prompt template, but replace the task list with the specific fix tasks. Include the reviewer's critical findings and/or failing test names in the prompt.
+   **Important**: The gate hook blocks implementer spawns when a batch has `status=failed`. Before spawning fix agents, update the batch status to `implementing`:
+   ```json
+   { "status": "implementing", "verified": false }
+   ```
+   This allows the gate to pass for fix agents.
 
-6. Wait for fix agents via `TaskOutput(block=true)`.
+   Use the implementer prompt template, but replace the task list with the specific fix tasks. Include the verifier's failure reasons in the prompt.
 
-7. Re-run verification: spawn a new reviewer for the wave (same template) and re-run tests. Evaluate the gate again.
+4. Wait for fix agents via `TaskOutput(block=true)`.
 
-8. If still failing after 2 fix rounds → report to user with the critical findings and test failures. Ask how to proceed. Do NOT continue to the next wave.
+5. Update status back to `implemented`, then re-verify: go back to step 7 (spawn wave-verifier again).
 
-#### 11. Mark Verified and Proceed
+6. If still failing after 2 fix rounds → report to user with the verifier's Failure Summary. Ask how to proceed. Do NOT continue to the next batch.
 
-Update state to `verified`:
+#### 9. Proceed to Next Batch
 
-```json
-{
-  "phase": "{current_phase_id}",
-  "wave": "{completed_wave_id}",
-  "completed_waves": ["X.1", "X.2"],
-  "status": "verified",
-  "verified": true,
-  "verification": {
-    "reviewer_verdict": "{clean|has-violations}",
-    "critical_findings": 0,
-    "tests_passed": true,
-    "test_regressions": 0,
-    "fix_rounds": 0
-  },
-  "last_updated": "{ISO 8601}"
-}
-```
-
-**Only now** may you proceed to the next wave (back to step 1 for the next wave). The hook will allow implementer spawns in this state.
-
-Do NOT attempt to review code yourself. Do NOT read the full review report files during wave execution — the lean summary is sufficient. Full reports are consumed at phase completion.
+After the hook sets `verified=true`, proceed to step 1 for the next batch. The gate will allow new implementer spawns.
 
 ### Phase Completion
 
-After all waves in a phase complete AND all wave reviewers return:
+After all batches in a phase are verified:
 
-1. Read all wave review files for this phase from `spec/reviews/` (files matching the phase's wave IDs).
-2. Combine all findings into `spec/reviews/phase-{n}-combined.md`:
+1. Update the phase field in state:
+   ```json
+   { "phase": "{next_phase_id}" }
+   ```
 
-```markdown
-# Combined Review: Phase {n} — {phase_name}
+2. Append phase summary to `spec/progress.md`:
+   ```markdown
+   ---
+   ## Phase {n} Complete
+   - **Batches**: {count}
+   - **All verified**: yes
+   ```
 
-## Summary
-- **Waves reviewed**: {list of wave IDs}
-- **Total violations**: {n} (critical: {n}, major: {n}, minor: {n})
-- **Total gaps**: {n}
-- **Total weak tests**: {n}
-- **Total legacy references**: {n}
-- **Verdict**: clean | has-violations
-
-## Violations
-{All violations from all wave reports, prefixed with wave ID}
-
-### [Wave {wave_id}] {V1}: {Short description}
-- **File**: `{path}`:{line}
-- **Rule**: {which rule is violated}
-- **Evidence**: `{the offending code or comment, quoted}`
-- **Severity**: critical | major | minor
-
-## Gaps
-{All gaps from all wave reports}
-
-## Weak Tests
-{All weak tests from all wave reports}
-
-## Legacy References
-{All legacy references from all wave reports}
-```
-
-3. **Classify findings** into mechanical vs. non-mechanical:
-   - **Mechanical** (fix without changing behaviour): `# TODO`/`# FIXME`/`# HACK` comments, historical-provenance comments, commented-out code, `pytest.skip()`/`pytest.xfail()` decorators, dead imports, backwards-compatibility re-exports.
-   - **Non-mechanical** (requires design decisions): missing implementations, incomplete spec coverage, weak test assertions, behavioural issues.
-
-4. **Present classification** to the user. For non-mechanical violations, explain what decision or work is needed.
-
-5. **Confirm automatic cleanup** of mechanical violations with the user. Do not proceed without confirmation.
-
-6. **Fix mechanical violations** directly: read file, remove offending code, verify removal does not break structure. Cleanup is purely subtractive.
-
-7. **Flag non-mechanical violations** to the user with file, line, spec requirement, current state, and decision needed.
-
-8. **Run tests** after mechanical cleanup. If tests fail, present failures — cleanup should never change behaviour.
+3. Continue to the next phase (back to Batch Execution for the new phase).
 
 ### After All Phases
 
 1. Run verification measures from `spec/plan.md` (test commands, acceptance criteria).
 2. Report final status:
-   - Phases/waves/tasks completed.
-   - Combined review outcomes per phase.
-   - Mechanical fixes applied.
-   - Non-mechanical issues flagged.
+   - Phases/batches/tasks completed.
+   - Verification outcomes per batch.
    - Test results.
 3. Clean up:
    ```bash
@@ -465,24 +419,22 @@ You are a long-running coordinator. Protect your context aggressively:
 - **Use `TaskOutput(block=true)` only.** Never poll with `block=false`.
 - **Spawn-then-wait**: For parallel execution, spawn multiple background Tasks in one message, then `TaskOutput` each in subsequent messages.
 - **Never read full git diffs.** Use `git diff --shortstat` if needed.
-- **Never read review report files during wave execution.** The lean summary is your sole source of quality information per wave. Read full reports only at phase completion for the combined review.
-- **Read phase spec files once per phase**, not per wave. The spec is the same for all waves in a phase.
+- **Read phase spec files once per phase**, not per batch.
 - **Read progress.md for current state** — scan for task completion markers, don't parse the full history.
-- **State file enables recovery.** If context compresses mid-execution, re-read `spec/.hybrid-state.json` and `spec/progress.md` to determine exactly where to resume. You do not need to re-read prior wave results. The state file's `status` field tells you exactly what to do next:
-  - `implementing` → implementers are running; wait for them (or check if they've already returned via progress.md).
-  - `wave_complete` → implementation done but not verified; go to step 8 (spawn reviewer).
-  - `verifying` → reviewer is running; wait for it (or check if review file exists).
-  - `failed` → verification failed; go to step 10a (fix loop).
-  - `fixing` → fix agents are running; wait for them.
-  - `verified` → safe to proceed to next wave; go to step 1 for the next wave.
+- **State file enables recovery.** If context compresses mid-execution, re-read `spec/.hybrid-state.json` and `spec/progress.md` to determine exactly where to resume. The last batch's `status` tells you what to do next:
+  - `implementing` → implementers are running; wait for them (or check progress.md).
+  - `implemented` → batch done but not verified; go to step 7 (spawn wave-verifier).
+  - `verifying` → verifier is running; wait for it.
+  - `verified` → safe to proceed to next batch.
+  - `failed` → verifier returned FAIL; go to step 8 (fix loop).
 
 ## Error Handling
 
 - If an implementer Task fails (error return), report to user and ask how to proceed.
 - If progress.md shows persistent failures across rounds, surface the details.
 - Never silently skip failed tasks — always report and get user direction.
-- After `TaskOutput` returns, verify `spec/progress.md` was updated with entries for the wave's tasks. If no new entries appear, the implementer failed internally — report to the user.
-- After a reviewer's `TaskOutput` returns, verify the review file exists at the expected path. If missing, the reviewer failed — report to the user and ask whether to re-run or proceed with the lean summary alone.
+- After `TaskOutput` returns, verify `spec/progress.md` was updated with entries for the batch's tasks. If no new entries appear, the implementer failed internally — report to the user.
+- After a verifier's `TaskOutput` returns, check the hook's injected context message. If you see `"hook success: Wave verification PASSED"` proceed normally. If you see `"hook success: Wave verification FAILED"` go to step 8. If you see the WARNING about unparseable verdict, report to the user.
 
 ## Shell Safety (Windows)
 
@@ -496,6 +448,7 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 
 - Run the materialize script during setup (Setup step 7). Implementer prompts are lean pointers to `spec/.context/` files.
 - Do not implement tasks yourself. Your job is to coordinate.
-- Do not review code yourself. Spawn the reviewer agent.
+- Do not verify code yourself. Spawn the wave-verifier agent.
 - The `claude-orchestrator:implementer` agent type provides full implementer instructions automatically. Do not redundantly point implementers to `spec/.context/implementer.md`.
 - Rely on `spec/progress.md` as source of truth, not on parsing agent output.
+- You **cannot** write `verified=true`. Only the PostToolUse hook can, and only on verifier PASS.

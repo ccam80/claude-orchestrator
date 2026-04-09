@@ -21,8 +21,8 @@ if [ "$mode" = "implement" ]; then
   cp "${plugin_root}/agents/reviewer.md"          "$dest/reviewer.md"
 elif [ "$mode" = "hybrid" ]; then
   cp "${plugin_root}/references/lock-protocol.md" "$dest/lock-protocol.md"
-  cp "${plugin_root}/agents/reviewer.md"          "$dest/reviewer.md"
-  # No orchestrator.md (eliminated) or implementer.md (loaded via agent type)
+  # No orchestrator.md (eliminated), implementer.md (loaded via agent type),
+  # or reviewer.md (reviewer is phase-completion only, run via review-orchestrated)
 elif [ "$mode" = "review" ]; then
   cp "${plugin_root}/agents/reviewer.md" "$dest/reviewer.md"
 elif [ "$mode" = "review-spec" ]; then
