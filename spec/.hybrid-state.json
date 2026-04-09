@@ -1,0 +1,13 @@
+{
+  "phase": "1",
+  "batches": [
+    {
+      "id": "batch-1",
+      "waves": ["1.1"],
+      "tasks": ["T1.1a", "T1.1b"],
+      "status": "implementing",
+      "verified": false
+    }
+  ],
+  "last_updated": "2026-04-09T04:01:00Z"
+}
