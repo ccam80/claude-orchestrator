@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 
-# mark-verified.sh — PostToolUse hook for claude-orchestrator:wave-verifier
-# Parses per-task-group verdicts from verifier output.
-# Increments verifications_passed and verifications_failed counters.
+# mark-verified.sh — SubagentStop hook for claude-orchestrator:wave-verifier
+# Parses per-task-group verdicts from the verifier's final assistant message,
+# and increments verifications_passed / verifications_failed counters.
+#
+# SubagentStop input:
+#   stdin — JSON with { agent_type, last_assistant_message, ... }
+#   exit 0 — always (this event cannot block)
 #
 # Expected verifier output format:
 #   ## Verdict: PASS PASS FAIL
 # (space-separated, one per task_group in order)
-#
-# Hook contract (PostToolUse):
-#   stdin  — JSON with { tool_name, tool_input, tool_response }
-#   exit 0 — always
 
-# --- Read stdin, filter by subagent_type ---
+# --- Read stdin, filter by agent_type ---
 TMPINPUT=$(mktemp)
 trap 'rm -f "$TMPINPUT"' EXIT
 cat > "$TMPINPUT"
 
 is_verifier=$(node -e "
   const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-  const st = (j.tool_input && j.tool_input.subagent_type) || '';
-  console.log(st === 'claude-orchestrator:wave-verifier' ? 'yes' : 'no');
+  const t = j.agent_type || '';
+  console.log(t === 'claude-orchestrator:wave-verifier' ? 'yes' : 'no');
 " "$TMPINPUT" 2>/dev/null || echo "no")
 
 if [ "$is_verifier" != "yes" ]; then
@@ -48,11 +48,8 @@ result=$(node -e "(() => {
   const input = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const stateFile = process.argv[2];
 
-  // Extract verdict line from tool_response
-  const resp = typeof input.tool_response === 'string'
-    ? input.tool_response
-    : JSON.stringify(input.tool_response || '');
-  const match = resp.match(/##\\s*Verdict:\\s*((?:PASS|FAIL)(?:\\s+(?:PASS|FAIL))*)/i);
+  const msg = input.last_assistant_message || '';
+  const match = msg.match(/##\\s*Verdict:\\s*((?:PASS|FAIL)(?:\\s+(?:PASS|FAIL))*)/i);
 
   if (!match) {
     console.log('WARNING:Could not parse verdict line from verifier output.');
@@ -63,7 +60,6 @@ result=$(node -e "(() => {
   const newPassed = verdicts.filter(v => v === 'PASS').length;
   const newFailed = verdicts.filter(v => v === 'FAIL').length;
 
-  // Update current batch counters
   const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   const batches = s.batches || [];
   const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);

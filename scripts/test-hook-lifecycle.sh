@@ -65,15 +65,16 @@ assert_counter() {
   fi
 }
 
+# PreToolUse inputs (gate scripts): filter on tool_input.subagent_type
 IMPL_JSON='{"tool_name":"Agent","tool_input":{"subagent_type":"claude-orchestrator:implementer","prompt":"test"}}'
 VERIFIER_JSON='{"tool_name":"Agent","tool_input":{"subagent_type":"claude-orchestrator:wave-verifier","prompt":"test"}}'
 OTHER_JSON='{"tool_name":"Agent","tool_input":{"subagent_type":"some-other-agent","prompt":"test"}}'
 
-# Simulate PostToolUse (tool_response included)
-IMPL_POST='{"tool_name":"Agent","tool_input":{"subagent_type":"claude-orchestrator:implementer","prompt":"test"},"tool_response":"done"}'
-VERIFY_PASS_POST='{"tool_name":"Agent","tool_input":{"subagent_type":"claude-orchestrator:wave-verifier","prompt":"test"},"tool_response":"## Verdict: PASS PASS"}'
-VERIFY_FAIL_POST='{"tool_name":"Agent","tool_input":{"subagent_type":"claude-orchestrator:wave-verifier","prompt":"test"},"tool_response":"## Verdict: PASS FAIL"}'
-VERIFY_PASS_SINGLE='{"tool_name":"Agent","tool_input":{"subagent_type":"claude-orchestrator:wave-verifier","prompt":"test"},"tool_response":"## Verdict: PASS"}'
+# SubagentStop inputs (completion scripts): filter on agent_type, read last_assistant_message
+IMPL_POST='{"hook_event_name":"SubagentStop","agent_type":"claude-orchestrator:implementer","last_assistant_message":"done"}'
+VERIFY_PASS_POST='{"hook_event_name":"SubagentStop","agent_type":"claude-orchestrator:wave-verifier","last_assistant_message":"## Verdict: PASS PASS"}'
+VERIFY_FAIL_POST='{"hook_event_name":"SubagentStop","agent_type":"claude-orchestrator:wave-verifier","last_assistant_message":"## Verdict: PASS FAIL"}'
+VERIFY_PASS_SINGLE='{"hook_event_name":"SubagentStop","agent_type":"claude-orchestrator:wave-verifier","last_assistant_message":"## Verdict: PASS"}'
 
 echo "=== BATCH 1: Two task groups (1.1, 1.2) ==="
 echo ""

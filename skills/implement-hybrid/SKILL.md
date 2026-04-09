@@ -9,9 +9,10 @@ hooks:
       hooks:
         - type: command
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-implementer.sh\""
-  PostToolUse:
-    - matcher: "Agent"
-      hooks:
+        - type: command
+          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-verifier.sh\""
+  SubagentStop:
+    - hooks:
         - type: command
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/complete-implementer.sh\""
         - type: command
@@ -38,10 +39,12 @@ Four hooks registered via frontmatter manage all state transitions:
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| `gate-implementer.sh` | PreToolUse on implementer | Checks spawn conditions, increments `spawned` on allow |
-| `complete-implementer.sh` | PostToolUse on implementer | Increments `completed` |
-| `gate-verifier.sh` | PreToolUse on verifier | Blocks if nothing to verify or batch already done |
-| `mark-verified.sh` | PostToolUse on verifier | Parses per-task-group verdicts, increments `passed`/`failed` |
+| `gate-implementer.sh` | PreToolUse on Agent | Filters on `subagent_type=implementer`; checks spawn conditions, increments `spawned` on allow |
+| `gate-verifier.sh` | PreToolUse on Agent | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or batch already done |
+| `complete-implementer.sh` | SubagentStop | Filters on `agent_type=implementer`; increments `completed` after the implementer actually finishes |
+| `mark-verified.sh` | SubagentStop | Filters on `agent_type=wave-verifier`; parses `## Verdict:` from `last_assistant_message`, increments `passed`/`failed` |
+
+**Why SubagentStop for completions?** `PostToolUse:Agent` fires when the `Agent` tool call *returns* — for `run_in_background: true` that's the moment the task id is handed back, long before the subagent finishes. At that point `tool_response` has no verifier verdict to parse. `SubagentStop` fires only when the subagent is actually done and exposes `last_assistant_message` directly for verdict parsing.
 
 **You do not write to the state file after setup.** The hooks own all counter fields. Your only job after setup is to spawn agents and read their output.
 

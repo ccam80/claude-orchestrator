@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
 
-# complete-implementer.sh — PostToolUse hook for claude-orchestrator:implementer
-# Increments the completed counter on the current batch when an implementer returns.
+# complete-implementer.sh — SubagentStop hook for claude-orchestrator:implementer
+# Increments the completed counter on the current batch when an implementer finishes.
 #
-# Hook contract (PostToolUse):
-#   stdin  — JSON with { tool_name, tool_input, tool_response }
-#   exit 0 — always
+# SubagentStop input:
+#   stdin — JSON with { agent_type, last_assistant_message, ... }
+#   exit 0 — always (this event cannot block)
+#
+# We filter by agent_type inside the script; the PostToolUse-era bug where
+# the hook fired at spawn-time (tool_response empty) does not apply here —
+# SubagentStop fires only after the subagent has fully finished.
 
-# --- Read stdin, filter by subagent_type ---
+# --- Read stdin, filter by agent_type ---
 TMPINPUT=$(mktemp)
 trap 'rm -f "$TMPINPUT"' EXIT
 cat > "$TMPINPUT"
 
 is_implementer=$(node -e "
   const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-  const st = (j.tool_input && j.tool_input.subagent_type) || '';
-  console.log(st === 'claude-orchestrator:implementer' ? 'yes' : 'no');
+  const t = j.agent_type || '';
+  console.log(t === 'claude-orchestrator:implementer' ? 'yes' : 'no');
 " "$TMPINPUT" 2>/dev/null || echo "no")
 
 if [ "$is_implementer" != "yes" ]; then
