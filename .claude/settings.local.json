@@ -9,7 +9,9 @@
       "Bash(echo NOT_FOUND:*)",
       "Bash(export:*)",
       "Bash(head:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "mcp__codebase-memory-mcp__index_repository",
+      "Skill(claude-orchestrator:implement-hybrid)"
     ]
   }
 }

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1774841901079,
+  "lastScanned": 1775698792637,
   "projectRoot": "C:\\local_working_projects\\claude-orchestrator",
   "techStack": {
     "languages": [],
@@ -38,7 +38,7 @@
       "path": "agents",
       "purpose": null,
       "fileCount": 4,
-      "lastAccessed": 1774841901056,
+      "lastAccessed": 1775698792621,
       "keyFiles": [
         "implementer.md",
         "orchestrator.md",
@@ -50,7 +50,7 @@
       "path": "references",
       "purpose": null,
       "fileCount": 3,
-      "lastAccessed": 1774841901056,
+      "lastAccessed": 1775698792621,
       "keyFiles": [
         "handoff-templates.md",
         "lock-protocol.md",
@@ -60,43 +60,68 @@
     "scripts": {
       "path": "scripts",
       "purpose": "Build/utility scripts",
-      "fileCount": 1,
-      "lastAccessed": 1774841901056,
+      "fileCount": 2,
+      "lastAccessed": 1775698792622,
       "keyFiles": [
-        "materialize-context.sh"
+        "materialize-context.sh",
+        "verify-wave-gate.sh"
       ]
     },
     "skills": {
       "path": "skills",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1774841901057,
+      "lastAccessed": 1775698792622,
       "keyFiles": []
     }
   },
   "hotPaths": [
     {
       "path": "skills\\implement-hybrid\\SKILL.md",
-      "accessCount": 12,
-      "lastAccessed": 1774843635886,
+      "accessCount": 21,
+      "lastAccessed": 1775703934231,
       "type": "file"
     },
     {
       "path": "scripts\\verify-wave-gate.sh",
+      "accessCount": 8,
+      "lastAccessed": 1775700200647,
+      "type": "file"
+    },
+    {
+      "path": "agents\\reviewer.md",
       "accessCount": 4,
-      "lastAccessed": 1774843551598,
+      "lastAccessed": 1775702953514,
+      "type": "file"
+    },
+    {
+      "path": "scripts\\materialize-context.sh",
+      "accessCount": 4,
+      "lastAccessed": 1775703918618,
+      "type": "file"
+    },
+    {
+      "path": ".claude\\settings.local.json",
+      "accessCount": 3,
+      "lastAccessed": 1775699780559,
       "type": "file"
     },
     {
       "path": "agents\\implementer.md",
-      "accessCount": 1,
-      "lastAccessed": 1774842010951,
+      "accessCount": 3,
+      "lastAccessed": 1775702503169,
+      "type": "file"
+    },
+    {
+      "path": "agents\\orchestrator.md",
+      "accessCount": 2,
+      "lastAccessed": 1775699061514,
       "type": "file"
     },
     {
       "path": "references\\rules.md",
-      "accessCount": 1,
-      "lastAccessed": 1774842010983,
+      "accessCount": 2,
+      "lastAccessed": 1775702954032,
       "type": "file"
     },
     {
@@ -112,27 +137,63 @@
       "type": "file"
     },
     {
-      "path": "agents\\orchestrator.md",
+      "path": "skills\\implement-orchestrated\\SKILL.md",
       "accessCount": 1,
-      "lastAccessed": 1774842018070,
+      "lastAccessed": 1775699050497,
       "type": "file"
     },
     {
-      "path": ".claude\\settings.local.json",
+      "path": ".claude-plugin\\marketplace.json",
       "accessCount": 1,
-      "lastAccessed": 1774843115442,
+      "lastAccessed": 1775700105488,
       "type": "file"
     },
     {
-      "path": "scripts\\materialize-context.sh",
+      "path": "agents\\wave-verifier.md",
       "accessCount": 1,
-      "lastAccessed": 1774843115583,
+      "lastAccessed": 1775703721105,
       "type": "file"
     },
     {
-      "path": "agents\\reviewer.md",
+      "path": "scripts\\gate-implementer.sh",
       "accessCount": 1,
-      "lastAccessed": 1774843119661,
+      "lastAccessed": 1775703770065,
+      "type": "file"
+    },
+    {
+      "path": "scripts\\mark-verified.sh",
+      "accessCount": 1,
+      "lastAccessed": 1775703786464,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1775703935143,
+      "type": "directory"
+    },
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 1,
+      "lastAccessed": 1775703941876,
+      "type": "directory"
+    },
+    {
+      "path": "spec\\plan.md",
+      "accessCount": 1,
+      "lastAccessed": 1775704710649,
+      "type": "file"
+    },
+    {
+      "path": "spec\\phase-1-test-file-creation.md",
+      "accessCount": 1,
+      "lastAccessed": 1775704715486,
+      "type": "file"
+    },
+    {
+      "path": "spec\\progress.md",
+      "accessCount": 1,
+      "lastAccessed": 1775704716094,
       "type": "file"
     }
   ],
