@@ -9,8 +9,6 @@ hooks:
       hooks:
         - type: command
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-implementer.sh\""
-        - type: command
-          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-verifier.sh\""
   PostToolUse:
     - matcher: "Agent"
       hooks:
