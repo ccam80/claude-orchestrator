@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 
-# gate-implementer.sh — PreToolUse hook for claude-orchestrator:implementer
+# gate-implementer.sh — PreToolUse hook for Agent tool
 # Blocks implementer spawns when any batch has completed but not been verified.
 #
-# Registered via implement-hybrid SKILL.md frontmatter with:
-#   if: "Agent(claude-orchestrator:implementer)"
-# So this script only runs for implementer agent spawns — no filtering needed.
+# Registered via implement-hybrid SKILL.md frontmatter (matcher: Agent).
+# The `if` field cannot filter by subagent_type (colons break the pattern),
+# so this script filters internally via tool_input.subagent_type.
 #
 # Hook contract:
 #   stdin  — JSON with { tool_name, tool_input }
 #   exit 0 — allow the tool call
 #   exit 2 — block the tool call (stdout shown to agent as reason)
 
-# --- Locate the state file (cheap bash check) ---
+# --- Locate the state file first (cheap bash check before any parsing) ---
 STATE_FILE=""
 dir="$PWD"
 while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
@@ -23,13 +23,25 @@ while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
   dir=$(dirname "$dir")
 done
 
-# No state file → first batch, nothing to gate
+# No state file → nothing to gate
 if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
   exit 0
 fi
 
-# Drain stdin (hook contract requires reading it even if unused)
-cat > /dev/null
+# --- Read stdin and filter by subagent_type ---
+TMPINPUT=$(mktemp)
+trap 'rm -f "$TMPINPUT"' EXIT
+cat > "$TMPINPUT"
+
+is_implementer=$(node -e "
+  const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+  const st = (j.tool_input && j.tool_input.subagent_type) || '';
+  console.log(st === 'claude-orchestrator:implementer' ? 'yes' : 'no');
+" "$TMPINPUT" 2>/dev/null || echo "no")
+
+if [ "$is_implementer" != "yes" ]; then
+  exit 0
+fi
 
 # --- Check for unverified completed batches ---
 # A batch blocks if: verified=false AND status is NOT "implementing"

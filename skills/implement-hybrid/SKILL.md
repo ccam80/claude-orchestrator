@@ -8,13 +8,11 @@ hooks:
     - matcher: "Agent"
       hooks:
         - type: command
-          if: "Agent(implementer)"
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-implementer.sh\""
   PostToolUse:
     - matcher: "Agent"
       hooks:
         - type: command
-          if: "Agent(wave-verifier)"
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mark-verified.sh\""
 ---
 

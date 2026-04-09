@@ -1,23 +1,34 @@
 #!/usr/bin/env bash
 
-# mark-verified.sh — PostToolUse hook for claude-orchestrator:wave-verifier
-# Parses the verifier's output. Sets verified=true for the current batch ONLY
-# if the verifier returned "## Verdict: PASS". On FAIL, injects context telling
-# the coordinator what to fix.
+# mark-verified.sh — PostToolUse hook for Agent tool
+# Parses the wave-verifier's output. Sets verified=true for the current batch
+# ONLY if the verifier returned "## Verdict: PASS". On FAIL, injects context
+# telling the coordinator what to fix.
 #
-# Registered via implement-hybrid SKILL.md frontmatter with:
-#   if: "Agent(claude-orchestrator:wave-verifier)"
-# So this script only runs after wave-verifier agents complete.
+# Registered via implement-hybrid SKILL.md frontmatter (matcher: Agent).
+# The `if` field cannot filter by subagent_type (colons break the pattern),
+# so this script filters internally via tool_input.subagent_type.
 #
 # Hook contract (PostToolUse):
 #   stdin  — JSON with { tool_name, tool_input, tool_response }
-#   stdout — optional JSON with additionalContext for the agent
+#   stdout — optional context for the agent
 #   exit 0 — always (PostToolUse cannot block, tool already ran)
 
 # --- Read hook input ---
 TMPINPUT=$(mktemp)
 trap 'rm -f "$TMPINPUT"' EXIT
 cat > "$TMPINPUT"
+
+# --- Filter by subagent_type — only act on wave-verifier ---
+is_verifier=$(node -e "
+  const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+  const st = (j.tool_input && j.tool_input.subagent_type) || '';
+  console.log(st === 'claude-orchestrator:wave-verifier' ? 'yes' : 'no');
+" "$TMPINPUT" 2>/dev/null || echo "no")
+
+if [ "$is_verifier" != "yes" ]; then
+  exit 0
+fi
 
 # --- Locate the state file ---
 STATE_FILE=""
