@@ -5,9 +5,11 @@
 #
 # Spawn conditions (ALL must be true):
 #   1. spawned < len(task_groups) + verifications_failed
+#                                  + stops_for_clarification
+#                                  + dead_implementers
 #   2. verifications_passed + verifications_failed >= completed
 #
-# Filters by subagent_type internally (if field can't handle colons).
+# Filters by subagent_type internally.
 #
 # Hook contract:
 #   stdin  — JSON with { tool_name, tool_input }
@@ -50,8 +52,12 @@ result=$(node -e "(() => {
   const s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const batches = s.batches || [];
 
-  // Current batch = first where verifications_passed < task_groups count
-  const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);
+  const isBatchDone = (b) => {
+    const gs = b.group_status || {};
+    const groups = b.task_groups || [];
+    return groups.length > 0 && groups.every(g => gs[g] === 'passed');
+  };
+  const batch = batches.find(b => !isBatchDone(b));
   if (!batch) {
     console.log('ALLOW');
     return;
@@ -62,12 +68,17 @@ result=$(node -e "(() => {
   const completed = batch.completed || 0;
   const passed = batch.verifications_passed || 0;
   const failed = batch.verifications_failed || 0;
+  const clarif = batch.stops_for_clarification || 0;
+  const dead = batch.dead_implementers || 0;
+  const cap = tg + failed + clarif + dead;
 
-  // Condition 1: haven't exceeded slots (initial + retries)
-  if (spawned >= tg + failed) {
+  // Condition 1: haven't exceeded slots (initial + retries from failures,
+  // clarification stops, and dead implementers)
+  if (spawned >= cap) {
     console.log('BLOCK:' + JSON.stringify({
       id: batch.id, reason: 'spawn_cap',
-      spawned: spawned, cap: tg + failed, task_groups: tg, failed: failed
+      spawned, cap, task_groups: tg, failed,
+      stops_for_clarification: clarif, dead_implementers: dead
     }));
     return;
   }
@@ -76,7 +87,7 @@ result=$(node -e "(() => {
   if (completed > 0 && (passed + failed) < completed) {
     console.log('BLOCK:' + JSON.stringify({
       id: batch.id, reason: 'unreviewed_work',
-      completed: completed, reviewed: passed + failed
+      completed, reviewed: passed + failed
     }));
     return;
   }
@@ -102,7 +113,7 @@ reason=$(node -e "console.log(JSON.parse(process.argv[1]).reason)" "$info" 2>/de
 if [ "$reason" = "spawn_cap" ]; then
   spawned=$(node -e "console.log(JSON.parse(process.argv[1]).spawned)" "$info" 2>/dev/null)
   cap=$(node -e "console.log(JSON.parse(process.argv[1]).cap)" "$info" 2>/dev/null)
-  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap). Spawn a wave-verifier to verify completed work. Failed verifications add retry slots." >&2
+  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap). Spawn a wave-verifier to verify completed work. Failed verifications, clarification stops, and dead implementers each add retry slots." >&2
 elif [ "$reason" = "unreviewed_work" ]; then
   completed=$(node -e "console.log(JSON.parse(process.argv[1]).completed)" "$info" 2>/dev/null)
   reviewed=$(node -e "console.log(JSON.parse(process.argv[1]).reviewed)" "$info" 2>/dev/null)

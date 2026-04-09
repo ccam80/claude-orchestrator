@@ -29,35 +29,42 @@ implement-orchestrated (3 levels):        implement-hybrid (2 levels):
 
 ## Verification Gate
 
-Two PreToolUse hooks gate spawns at the Claude Code runtime level; two in-band scripts are invoked by the subagents themselves to record completion:
+Two PreToolUse hooks gate spawns at the Claude Code runtime level; five in-band scripts are invoked either by the subagents themselves or by you (the coordinator) to record state transitions:
 
 | Script | Invoked by | When | Action |
 |--------|-----------|------|--------|
 | `gate-implementer.sh` | Claude Code (PreToolUse on Agent, skill frontmatter) | Before each Agent tool call | Filters on `subagent_type=implementer`; checks spawn conditions, increments `spawned` on allow; exit 2 with stderr reason on block |
-| `gate-verifier.sh` | Claude Code (PreToolUse on Agent, skill frontmatter) | Before each Agent tool call | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or batch already done |
-| `complete-implementer.sh` | **implementer agent itself** | As the implementer's final bash call before returning | Increments `completed` on the current batch |
-| `mark-verified.sh` | **wave-verifier agent itself** | As the verifier's final bash call before returning, with the verdict string as arg | Increments `verifications_passed` / `verifications_failed` on the current batch |
+| `gate-verifier.sh` | Claude Code (PreToolUse on Agent, skill frontmatter) | Before each Agent tool call | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or the batch is already fully verified |
+| `complete-implementer.sh` | **implementer agent itself** | As the implementer's final bash call before returning normally | Increments `completed` on the current batch |
+| `stop-for-clarification.sh` | **implementer agent itself** | As the final bash call when the implementer is stopping because the spec is ambiguous (alternative to `complete-implementer.sh`) | Increments `stops_for_clarification` on the current batch — opens a retry slot without marking work as completed |
+| `mark-verified.sh` | **wave-verifier agent itself** | As the verifier's final bash call, with a JSON verdict map as arg | Updates `group_status` per task_group, increments `verifications_passed` / `verifications_failed`; rejects any entry for a task_group that is already `passed` |
+| `mark-dead-implementer.sh` | **you (the coordinator)** | When you have positive evidence an implementer subagent died without running `complete-implementer.sh` | Increments `dead_implementers` on the current batch — opens a retry slot |
+| `mark-dead-verifier.sh` | **you (the coordinator)** | When you have positive evidence a wave-verifier died without running `mark-verified.sh` | Increments `dead_verifiers` for observability; no gate impact — just re-spawn the verifier afterwards |
 
-**Why in-band completion tracking?** Claude Code's `SubagentStop` hooks (whether registered on the skill or on the agent's own frontmatter as `Stop`) are not reliably invoked for background subagents — this is a known issue. `PostToolUse:Agent` fires when the `Agent` tool *returns*, which for `run_in_background: true` is at spawn time, long before the subagent finishes. The only reliable mechanism is to have the subagent invoke the recording script itself as its last action before returning. The implementer and wave-verifier agents' workflows make this mandatory.
+**Why in-band recording?** Claude Code's `SubagentStop` hooks (whether registered on the skill or on the agent's own frontmatter as `Stop`) are not reliably invoked for background subagents — this is a known issue. `PostToolUse:Agent` fires when the `Agent` tool *returns*, which for `run_in_background: true` is at spawn time, long before the subagent finishes. The only reliable mechanism is to have the subagent invoke the recording script itself as its last action before returning. The implementer and wave-verifier agents' workflows make this mandatory.
 
-**You do not write counter fields in the state file after setup.** Completion counters are written by the scripts the subagents invoke. The coordinator only writes counters under the dead-subagent fallback (see below).
+**You do not write counter fields in the state file after setup.** Normal completion, clarification, and verdict updates are all written by scripts the subagents invoke themselves. The only time you, the coordinator, touch counters is by invoking `mark-dead-implementer.sh` or `mark-dead-verifier.sh` — never by editing the state file directly.
 
 ### Dead-Subagent Fallback
 
-An in-band completion script is only as reliable as the subagent running it. If a subagent dies or hangs before invoking its completion script, its counter never increments and the batch stalls. Recovery protocol when a spawn appears stuck:
+An in-band recording script is only as reliable as the subagent running it. If a subagent dies or hangs before invoking its script, its counter never increments and the batch stalls. Recovery protocol when a spawn appears stuck:
 
 1. Look up the subagent's `agentId` from the `TaskOutput` retrieval or the spawn response.
-2. Inspect the subagent's process / output file to determine whether it is actually still running, or dead with no further output. If `TaskOutput` returned a `completed` status but the counter didn't move, the agent finished without running its completion script.
-3. **Only when you have positive evidence the subagent is dead** (`TaskOutput` returned completed/failed, or the process is no longer present), you may manually increment the appropriate counter yourself. Use the smallest possible edit:
-   - For an implementer that died without running `complete-implementer.sh`: increment `batch.completed` by 1.
-   - For a wave-verifier that died without running `mark-verified.sh`: you cannot recover its verdict — spawn a replacement verifier after first bumping `verifications_failed` by the number of task_groups it was assigned, which opens retry slots.
-4. Log the manual intervention in `spec/progress.md` under a **Manual state adjustments** heading with timestamp, batch id, counter, and reason.
+2. Inspect the subagent's process / output file to determine whether it is actually still running, or dead with no further output. If `TaskOutput` returned a `completed` status but the counter didn't move, the agent finished without running its recording script.
+3. **Only when you have positive evidence the subagent is dead** (`TaskOutput` returned completed/failed, or the process is no longer present), invoke the matching recovery script from the project root:
+   - For a dead implementer: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/mark-dead-implementer.sh"` — increments `dead_implementers`, opens a retry slot. Do not manually edit `batch.completed`: a dead implementer did not complete anything, and counting it as completed would cause the wave-verifier to verify work that does not exist.
+   - For a dead wave-verifier: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/mark-dead-verifier.sh"`, then spawn a replacement verifier. A dead verifier leaves `verifications_passed` / `verifications_failed` / `group_status` untouched, so the gate will allow the replacement automatically without any counter surgery.
+4. Log the recovery in `spec/progress.md` under a **Recovery events** heading with timestamp, batch id, which script you invoked, and why (e.g. "TaskOutput returned completed for agent X but counters unchanged after 30s").
 
 Never use this fallback speculatively. A live subagent whose counter simply hasn't updated yet is not dead — wait for `TaskOutput(block=true)` to return before considering intervention.
 
-### Counter-Based State
+### Clarification Stops
 
-The state file `spec/.hybrid-state.json` uses counters, not status fields:
+An implementer that hits a blocking spec ambiguity is expected to take the "Clarification Exit" path described in `agents/implementer.md`: release its locks, append a `CLARIFICATION NEEDED` entry to `spec/progress.md`, and call `stop-for-clarification.sh` as its final bash call. When you read `spec/progress.md` after processing implementer results (step 2 of "For Each Batch"), look for any `CLARIFICATION NEEDED` entries — those are questions the user must answer before the batch can progress. Surface the entry verbatim to the user, wait for the answer, update the phase spec file with the clarified wording, and then respawn a fresh implementer for the affected task_group. The spawn gate allows the respawn because `stops_for_clarification` opened a retry slot on the current batch.
+
+### Counter + Per-Group-Status State
+
+The state file `spec/.hybrid-state.json` combines counters with per-task_group status. The counters drive the spawn cap; the per-group status is the definitive "batch done" signal.
 
 ```json
 {
@@ -69,38 +76,52 @@ The state file `spec/.hybrid-state.json` uses counters, not status fields:
       "spawned": 0,
       "completed": 0,
       "verifications_passed": 0,
-      "verifications_failed": 0
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "1.1": "pending",
+        "1.2": "pending",
+        "1.3": "pending"
+      }
     }
   ],
   "last_updated": "{ISO 8601}"
 }
 ```
 
-**Fields you write (once, at setup):** `id`, `task_groups`, `tasks`, and the four counters initialized to 0.
+**Fields you write (once, at setup):** `id`, `task_groups`, `tasks`, all seven counters initialized to 0, and `group_status` with every task_group set to `"pending"`.
 
-**Fields written after setup:**
+**Fields written after setup (do not edit them yourself):**
 - `spawned` — written by `gate-implementer.sh` (PreToolUse hook, automatic).
-- `completed` — written by `complete-implementer.sh` invoked by the implementer agent itself as its last bash call.
-- `verifications_passed` / `verifications_failed` — written by `mark-verified.sh` invoked by the wave-verifier agent itself as its last bash call.
+- `completed` — written by `complete-implementer.sh`, invoked by the implementer agent as its final bash call on a normal finish.
+- `stops_for_clarification` — written by `stop-for-clarification.sh`, invoked by the implementer agent as its final bash call when it takes the clarification exit path instead of finishing the task.
+- `verifications_passed` / `verifications_failed` / `group_status` — written by `mark-verified.sh`, invoked by the wave-verifier agent as its final bash call with a JSON verdict map.
+- `dead_implementers` / `dead_verifiers` — written by `mark-dead-implementer.sh` / `mark-dead-verifier.sh`, which you (the coordinator) invoke under the dead-subagent fallback.
 - `last_updated` — written by whichever of the above runs most recently.
 
-Each **task_group** is one implementer's assignment — the tasks that one agent will work on. The `task_groups` array has one entry per implementer you plan to spawn. The `tasks` array is parallel — `tasks[i]` lists the spec task IDs for `task_groups[i]`.
+Each **task_group** is one implementer's assignment — the tasks that one agent will work on. The `task_groups` array has one entry per implementer you plan to spawn. The `tasks` array is parallel — `tasks[i]` lists the spec task IDs for `task_groups[i]`. `group_status[task_group_id]` tracks whether that group is currently `"pending"`, `"failed"`, or `"passed"`.
+
+`verifications_passed` and `verifications_failed` are cumulative historical counts used by the spawn cap formula — a group that was FAILED and then PASSED on retry shows `verifications_passed=1, verifications_failed=1` and `group_status[group] == "passed"`. The historical `verifications_failed` stays at 1 because it opened a retry slot that was consumed; the current status is the authoritative "is this group done" signal.
 
 ### Spawn Conditions
 
 **Implementer allowed when ALL true:**
-1. `spawned < len(task_groups) + verifications_failed` — haven't exceeded initial slots + retry slots
-2. `verifications_passed + verifications_failed >= completed` — all completed work has been reviewed
+1. `spawned < len(task_groups) + verifications_failed + stops_for_clarification + dead_implementers` — total slot cap (initial slots, plus one retry slot per historical failure, clarification stop, or dead implementer)
+2. `verifications_passed + verifications_failed >= completed` — all completed work has been reviewed (clarification stops and dead implementers do not contribute to `completed`, so they do not block this check)
 
 **Verifier allowed when ALL true:**
-1. `verifications_passed < len(task_groups)` — batch not fully verified yet
+1. At least one task_group in `group_status` is not yet `"passed"` — the batch is not fully verified
 2. `completed > verifications_passed + verifications_failed` — unreviewed completed work exists
+
+**Batch is fully verified when** every task_group in `group_status` equals `"passed"`. This replaces the old `verifications_passed >= len(task_groups)` check, which could silently accept over-counted verdicts when retry verifiers padded the verdict string with PASS tokens for already-passed groups.
 
 ### If a Hook Blocks You
 
 If you see a `BLOCKED:` message:
 
-- **"spawn_cap"** — all implementer slots used. Spawn a wave-verifier to review completed work. Failed verifications add retry slots.
+- **"spawn_cap"** — all implementer slots used. Spawn a wave-verifier to review completed work. Retry slots are added by failed verifications, clarification stops (`stops_for_clarification`), and dead implementers (`dead_implementers`).
 - **"unreviewed_work"** — completed implementations haven't been verified. Spawn a wave-verifier.
 - **"nothing_to_verify"** — no unreviewed work. Wait for implementers to complete, or check if the batch is already done.
 - **"all_batches_verified"** — all batches are done. Proceed to cleanup.
@@ -116,12 +137,11 @@ Do NOT modify the state file to work around a block. The hooks enforce correctne
    - If `spec/.hybrid-state.json` exists, read it — resume from where counters left off.
    - Otherwise read `spec/progress.md` to determine what's already complete.
 5. Read the phase spec file for the **first incomplete phase only**.
-6. Read the project's `CLAUDE.md` for project-specific rules.
-7. Materialize shared context files:
+6. Materialize shared context files:
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" hybrid "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
    ```
-8. Initialize lock directories:
+7. Initialize lock directories:
    ```bash
    mkdir -p "spec/.locks/tasks" "spec/.locks/files"
    ```
@@ -147,7 +167,14 @@ Write the complete state file:
       "spawned": 0,
       "completed": 0,
       "verifications_passed": 0,
-      "verifications_failed": 0
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "1.1": "pending",
+        "1.2": "pending"
+      }
     },
     {
       "id": "batch-2",
@@ -156,14 +183,20 @@ Write the complete state file:
       "spawned": 0,
       "completed": 0,
       "verifications_passed": 0,
-      "verifications_failed": 0
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "2.1": "pending"
+      }
     }
   ],
   "last_updated": "{ISO 8601}"
 }
 ```
 
-**After this write, do not modify the state file again.** All counter updates happen via hooks.
+**After this write, do not modify the state file again except via the recovery scripts.** Normal counter updates happen through in-band scripts the subagents invoke themselves; `dead_implementers` / `dead_verifiers` are written by the matching recovery scripts when you invoke them under the dead-subagent fallback.
 
 ## Test Baseline
 
@@ -203,7 +236,7 @@ Wait for the baseline Task to complete via `TaskOutput(task_id, block=true)`.
 
 ## Batch Execution
 
-Execute batches in order. The hooks enforce: you cannot start batch N+1 until batch N is fully verified (`verifications_passed == len(task_groups)`).
+Execute batches in order. The hooks enforce: you cannot start batch N+1 until every task_group in batch N has `group_status == "passed"`.
 
 ### For Each Batch
 
@@ -244,19 +277,25 @@ Read these files before doing anything else:
 - `spec/test-baseline.md` — pre-existing test failures (check before investigating any test failure)
 ```
 
-After spawning all implementers in one message, call `TaskOutput(task_id, block=true)` for each in a follow-up message. Each implementer invokes `complete-implementer.sh` as its own final bash call, which increments `completed` on the current batch. When `TaskOutput` returns with `status: completed` for every implementer, re-read `spec/.hybrid-state.json` to confirm `completed` caught up. If an implementer returned completed but the counter did not advance, apply the dead-subagent fallback described at the top of this file.
+After spawning all implementers in one message, call `TaskOutput(task_id, block=true)` for each in a follow-up message. Each implementer invokes `complete-implementer.sh` as its own final bash call on a normal finish, which increments `completed` on the current batch; an implementer that hit a spec ambiguity will instead invoke `stop-for-clarification.sh`, which increments `stops_for_clarification` without touching `completed`.
+
+When `TaskOutput` returns with `status: completed` for every implementer, re-read `spec/.hybrid-state.json`:
+- `completed` should equal the number of implementers that finished normally.
+- `stops_for_clarification` should equal the number of implementers that took the clarification exit.
+- If an implementer returned a completed `TaskOutput` status but neither counter advanced, the agent finished without running either recording script — apply the dead-subagent fallback and call `mark-dead-implementer.sh`.
 
 #### 2. Process Results
 
 After all implementer Tasks return:
-1. Read `spec/progress.md` for updated status — this is the source of truth.
-2. If tasks remain incomplete, you may spawn more implementers (the hooks will allow this only if retry slots are available from failed verifications).
-3. Commit completed work:
+1. Read `spec/progress.md` for updated status — this is the source of truth for file lists and per-task outcomes.
+2. Look for any `CLARIFICATION NEEDED` entries in `spec/progress.md`. Each one is a blocker: surface the entry to the user verbatim, wait for the answer, edit the phase spec file to bake in the clarified wording, then respawn a fresh implementer for the affected task_group (the `stops_for_clarification` counter will have opened a retry slot for you).
+3. If tasks remain incomplete for reasons other than clarification (e.g. a partial finish noted in `spec/progress.md`), you may spawn more implementers; the hooks will allow this only if retry slots are available from failed verifications, clarification stops, or dead implementers.
+4. Commit completed work:
    ```bash
    git add -A
    git commit -m "Batch {batch_id} implementation complete"
    ```
-4. Clean locks:
+5. Clean locks:
    ```bash
    rm -rf "spec/.locks/tasks/"* "spec/.locks/files/"* 2>/dev/null
    ```
@@ -272,6 +311,8 @@ Spawn the wave-verifier as a background Task:
 
 The PreToolUse hook checks that unreviewed completed work exists before allowing the spawn.
 
+Before assembling the prompt, read `spec/.hybrid-state.json` and compute the list of **unreviewed task_groups** for the active batch — every task_group whose `group_status` is either `"pending"` (never verified) or `"failed"` (verified FAIL and subsequently retried). This is the exact list the verifier must verify in this run; already-`"passed"` groups must not be re-verified, and `mark-verified.sh` will reject them if the verifier tries.
+
 Use this prompt template:
 
 ```markdown
@@ -284,8 +325,10 @@ Use this prompt template:
 ## Batch: {batch_id}
 - **Phase**: {phase_name}
 - **Phase spec file**: spec/phase-{n}-{name}.md
-- **Task groups**: {task_group_list}
-- **Tasks per group**: {tasks_per_group}
+- **Unreviewed task_groups to verify in this run**: {unreviewed_task_group_list}
+- **Tasks per group**: {tasks_per_group restricted to unreviewed groups}
+
+Verify ONLY the task_groups listed above. Do NOT emit a verdict for any task_group that is not in this list — those are already passed and re-verifying them is a counter-corruption bug the state file will reject.
 
 ## Test Command
 {test_command from CLAUDE.md or spec/plan.md}
@@ -301,9 +344,9 @@ Read these files before doing anything else:
 
 **Wait for the verifier to complete** via `TaskOutput(task_id, block=true)`.
 
-The wave-verifier invokes `mark-verified.sh "<verdict>"` as its own final bash call, passing its verdict string (space-separated `PASS` / `FAIL` tokens, one per task group, in task_group order). That script increments `verifications_passed` and `verifications_failed` on the current batch.
+The wave-verifier invokes `mark-verified.sh '<json-verdict-map>'` as its own final bash call, passing a JSON object whose keys are the unreviewed task_group IDs it verified and whose values are `PASS` or `FAIL` (e.g. `'{"0.1.a":"PASS","0.1.c":"FAIL"}'`). That script updates `group_status` per task_group and increments `verifications_passed` / `verifications_failed`.
 
-After `TaskOutput` returns, re-read `spec/.hybrid-state.json` to confirm the counters advanced. If they did not (verifier died before running its recording script), treat the batch as fully failed: bump `verifications_failed` by the task_group count and spawn a replacement verifier. Also cross-check the verifier's returned report `## Verdict:` line against the counters — if they disagree, trust the counters and investigate the discrepancy before proceeding.
+After `TaskOutput` returns, re-read `spec/.hybrid-state.json` to confirm `group_status` advanced for the expected task_groups. If it did not (verifier died before running its recording script), invoke `mark-dead-verifier.sh` and spawn a replacement verifier with the same unreviewed task_group list — no other counter surgery is needed, because a dead verifier leaves the verification counters and `group_status` untouched. Cross-check the verifier's returned report `## Verdict` JSON map against `group_status` — if they disagree, trust the state file and investigate the discrepancy before proceeding.
 
 #### 4. Handle Verification Failure
 
@@ -319,7 +362,7 @@ If the verifier reported failures:
 
 #### 5. Next Batch
 
-After the batch is fully verified (`verifications_passed == len(task_groups)`), proceed to the next batch (back to step 1). The hooks will now target the next incomplete batch.
+After every task_group in the batch has `group_status == "passed"`, proceed to the next batch (back to step 1). The hooks will now target the next incomplete batch.
 
 ### Phase Completion
 
@@ -354,11 +397,12 @@ You are a long-running coordinator. Protect your context aggressively:
 - **Spawn-then-wait**: spawn multiple background Tasks in one message, then `TaskOutput` each.
 - **Never read full git diffs.** Use `git diff --shortstat` if needed.
 - **Read phase spec files once per phase**, not per batch.
-- **State file enables recovery.** If context compresses, re-read `spec/.hybrid-state.json`. The counters tell you exactly where you are:
-  - `spawned < len(task_groups)` → still spawning implementers for this batch.
-  - `spawned == len(task_groups)` and `completed < spawned` → waiting for implementers.
-  - `completed > verifications_passed + verifications_failed` → need to spawn verifier.
-  - `verifications_passed == len(task_groups)` → batch done, move to next.
+- **State file enables recovery.** If context compresses, re-read `spec/.hybrid-state.json`. The combination of counters and `group_status` tells you exactly where you are on the active batch (first batch whose `group_status` has any entry that is not `"passed"`):
+  - `spawned < len(task_groups) + verifications_failed + stops_for_clarification + dead_implementers` and at least one group is still `"pending"` → room to spawn more implementers for first-pass work or retries.
+  - `completed + stops_for_clarification + dead_implementers < spawned` → still waiting for implementers to finish (normally, via clarification, or to be declared dead).
+  - `completed > verifications_passed + verifications_failed` → unreviewed completed work exists, spawn a verifier.
+  - Some task_groups have `group_status == "failed"` and the last verifier run is done → spawn retry implementers for those specific groups.
+  - Every task_group has `group_status == "passed"` → batch done, move to the next one.
 
 ## Error Handling
 
@@ -378,9 +422,14 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 
 ## Important
 
-- Plan all batches and write the state file ONCE during setup. Do not modify it after.
+- Plan all batches and write the state file ONCE during setup. After that, never edit the state file by hand — all updates happen through the in-band scripts and the dead-subagent recovery scripts.
 - Do not implement tasks yourself. Your job is to coordinate.
 - Do not verify code yourself. Spawn the wave-verifier agent.
 - The `claude-orchestrator:implementer` agent type loads its instructions automatically.
 - Rely on `spec/progress.md` as source of truth, not on parsing agent output.
-- The PreToolUse gate owns `spawned`. The implementer and wave-verifier agents own `completed`, `verifications_passed`, and `verifications_failed` via the scripts they invoke in-band. You, the coordinator, only write counter values under the dead-subagent fallback — see the "Dead-Subagent Fallback" section at the top of this file.
+- Ownership of state fields:
+  - `spawned` — written by the PreToolUse `gate-implementer.sh` hook.
+  - `completed` — written by `complete-implementer.sh`, invoked by the implementer on a normal finish.
+  - `stops_for_clarification` — written by `stop-for-clarification.sh`, invoked by the implementer on a clarification exit.
+  - `verifications_passed` / `verifications_failed` / `group_status` — written by `mark-verified.sh`, invoked by the wave-verifier.
+  - `dead_implementers` / `dead_verifiers` — written by `mark-dead-implementer.sh` / `mark-dead-verifier.sh`, which you invoke under the dead-subagent fallback described in the "Dead-Subagent Fallback" section.

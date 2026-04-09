@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 
 # mark-verified.sh — invoked in-band by the wave-verifier agent as its final
-# bash call. Takes the verdict string as its sole positional argument and
-# increments verifications_passed / verifications_failed on the current batch.
+# bash call. Takes a JSON verdict map (single positional arg) and updates the
+# per-task-group status on the active batch in spec/.hybrid-state.json.
 #
 # Usage:
-#   bash mark-verified.sh "PASS PASS FAIL"
+#   bash mark-verified.sh '{"0.1.a":"PASS","0.1.c":"FAIL"}'
 #
-# The verdict argument must be a space-separated list of PASS / FAIL tokens,
-# one per task_group, in task_group order.
+# The map keys are task_group IDs; values are PASS or FAIL. Only include
+# task_groups this verifier run actually verified. Do NOT pad the map with
+# PASS entries for already-passed groups — the script rejects entries for
+# task_groups whose current status is already "passed".
 
-VERDICT_STRING="$1"
+VERDICT_ARG="$1"
 
-if [ -z "$VERDICT_STRING" ]; then
-  echo "mark-verified: ERROR — verdict string argument is required (e.g. \"PASS PASS FAIL\")" >&2
+if [ -z "$VERDICT_ARG" ]; then
+  echo "mark-verified: ERROR — verdict map argument is required (e.g. '{\"0.1.a\":\"PASS\"}')" >&2
   exit 1
 fi
 
@@ -33,71 +35,126 @@ if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
   exit 1
 fi
 
-# --- Parse verdict tokens and update counters ---
+# --- Parse verdict map and update per-group status ---
 result=$(node -e "(() => {
   const fs = require('fs');
   const stateFile = process.argv[1];
-  const verdictArg = process.argv[2] || '';
+  const verdictArg = process.argv[2];
+  const out = (obj) => console.log(JSON.stringify(obj));
 
-  const tokens = verdictArg.trim().toUpperCase().split(/\\s+/).filter(Boolean);
-  const valid = tokens.every(t => t === 'PASS' || t === 'FAIL');
-  if (tokens.length === 0 || !valid) {
-    console.log('ERROR:Invalid verdict string. Expected space-separated PASS/FAIL tokens.');
+  let verdict;
+  try {
+    verdict = JSON.parse(verdictArg);
+  } catch (e) {
+    out({ok: false, error: 'Invalid JSON verdict map: ' + e.message});
+    return;
+  }
+  if (!verdict || typeof verdict !== 'object' || Array.isArray(verdict)) {
+    out({ok: false, error: 'Verdict must be a JSON object mapping task_group IDs to PASS or FAIL.'});
     return;
   }
 
-  const newPassed = tokens.filter(t => t === 'PASS').length;
-  const newFailed = tokens.filter(t => t === 'FAIL').length;
+  const entries = Object.entries(verdict);
+  if (entries.length === 0) {
+    out({ok: false, error: 'Verdict map is empty — pass at least one task_group verdict.'});
+    return;
+  }
+  for (const [key, val] of entries) {
+    if (val !== 'PASS' && val !== 'FAIL') {
+      out({ok: false, error: 'Task_group ' + JSON.stringify(key) + ' has invalid verdict ' +
+        JSON.stringify(val) + ' — must be PASS or FAIL.'});
+      return;
+    }
+  }
 
   const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   const batches = s.batches || [];
-  const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);
+  const isBatchDone = (b) => {
+    const gs = b.group_status || {};
+    const groups = b.task_groups || [];
+    return groups.length > 0 && groups.every(g => gs[g] === 'passed');
+  };
+  const batch = batches.find(b => !isBatchDone(b));
 
   if (!batch) {
-    console.log('ERROR:No active batch found to update.');
+    out({ok: false, error: 'No active batch found to update.'});
     return;
   }
 
+  // Initialise group_status if missing (backward compat with pre-upgrade state).
+  if (!batch.group_status) {
+    batch.group_status = {};
+    for (const g of (batch.task_groups || [])) {
+      batch.group_status[g] = 'pending';
+    }
+  }
+
+  // Validate every verdict entry before applying any.
+  const batchGroups = new Set(batch.task_groups || []);
+  for (const [key] of entries) {
+    if (!batchGroups.has(key)) {
+      out({ok: false, error: 'Task_group ' + JSON.stringify(key) + ' is not in batch ' +
+        JSON.stringify(batch.id) + '. Known groups: ' + JSON.stringify([...batchGroups])});
+      return;
+    }
+    const current = batch.group_status[key] || 'pending';
+    if (current === 'passed') {
+      out({ok: false, error: 'Task_group ' + JSON.stringify(key) + ' is already passed on batch ' +
+        JSON.stringify(batch.id) + ' and cannot be re-verified. Only include task_groups you actually re-verified in this run.'});
+      return;
+    }
+  }
+
+  // Apply verdicts.
+  let newPassed = 0;
+  let newFailed = 0;
+  for (const [key, val] of entries) {
+    if (val === 'PASS') {
+      batch.group_status[key] = 'passed';
+      newPassed += 1;
+    } else {
+      batch.group_status[key] = 'failed';
+      newFailed += 1;
+    }
+  }
   batch.verifications_passed = (batch.verifications_passed || 0) + newPassed;
   batch.verifications_failed = (batch.verifications_failed || 0) + newFailed;
   s.last_updated = new Date().toISOString();
   fs.writeFileSync(stateFile, JSON.stringify(s, null, 2));
 
-  const tg = (batch.task_groups || []).length;
-  const totalPassed = batch.verifications_passed;
-  const done = totalPassed >= tg;
-
-  console.log('OK:' + JSON.stringify({
+  const groups = batch.task_groups || [];
+  const groupsPassed = groups.filter(g => batch.group_status[g] === 'passed').length;
+  out({
+    ok: true,
     batch: batch.id,
     new_passed: newPassed,
     new_failed: newFailed,
-    total_passed: totalPassed,
-    total_failed: batch.verifications_failed,
-    task_groups: tg,
-    batch_complete: done
-  }));
-})()" "$STATE_FILE" "$VERDICT_STRING" 2>/dev/null || echo "ERROR:node error")
+    groups_passed: groupsPassed,
+    groups_total: groups.length,
+    batch_complete: groupsPassed === groups.length
+  });
+})()" "$STATE_FILE" "$VERDICT_ARG" 2>/dev/null || echo '{"ok":false,"error":"node execution failed"}')
 
-action=$(echo "$result" | cut -d: -f1)
+ok=$(node -e "try { console.log(JSON.parse(process.argv[1]).ok) } catch (e) { console.log('false') }" "$result" 2>/dev/null || echo "false")
 
-if [ "$action" = "OK" ]; then
-  info=$(echo "$result" | cut -d: -f2-)
-  new_passed=$(node -e "console.log(JSON.parse(process.argv[1]).new_passed)" "$info" 2>/dev/null)
-  new_failed=$(node -e "console.log(JSON.parse(process.argv[1]).new_failed)" "$info" 2>/dev/null)
-  total_passed=$(node -e "console.log(JSON.parse(process.argv[1]).total_passed)" "$info" 2>/dev/null)
-  tg=$(node -e "console.log(JSON.parse(process.argv[1]).task_groups)" "$info" 2>/dev/null)
-  batch_complete=$(node -e "console.log(JSON.parse(process.argv[1]).batch_complete)" "$info" 2>/dev/null)
-  batch_id=$(node -e "console.log(JSON.parse(process.argv[1]).batch)" "$info" 2>/dev/null)
+if [ "$ok" = "true" ]; then
+  new_passed=$(node -e "console.log(JSON.parse(process.argv[1]).new_passed)" "$result" 2>/dev/null)
+  new_failed=$(node -e "console.log(JSON.parse(process.argv[1]).new_failed)" "$result" 2>/dev/null)
+  groups_passed=$(node -e "console.log(JSON.parse(process.argv[1]).groups_passed)" "$result" 2>/dev/null)
+  groups_total=$(node -e "console.log(JSON.parse(process.argv[1]).groups_total)" "$result" 2>/dev/null)
+  batch_complete=$(node -e "console.log(JSON.parse(process.argv[1]).batch_complete)" "$result" 2>/dev/null)
+  batch_id=$(node -e "console.log(JSON.parse(process.argv[1]).batch)" "$result" 2>/dev/null)
 
   if [ "$batch_complete" = "true" ]; then
-    echo "mark-verified: Batch '$batch_id' fully verified ($total_passed/$tg passed)."
+    echo "mark-verified: Batch '$batch_id' fully verified ($groups_passed/$groups_total task_groups passed)."
   elif [ "$new_failed" != "0" ]; then
-    echo "mark-verified: Recorded — $new_passed passed, $new_failed failed ($total_passed/$tg total)."
+    echo "mark-verified: Recorded — $new_passed passed, $new_failed failed ($groups_passed/$groups_total task_groups now passing)."
   else
-    echo "mark-verified: Recorded — $new_passed passed ($total_passed/$tg total)."
+    echo "mark-verified: Recorded — $new_passed passed ($groups_passed/$groups_total task_groups now passing)."
   fi
   exit 0
 fi
 
-echo "mark-verified: $result" >&2
+err=$(node -e "console.log(JSON.parse(process.argv[1]).error || 'unknown error')" "$result" 2>/dev/null || echo "unknown error")
+echo "mark-verified: ERROR — $err" >&2
 exit 1

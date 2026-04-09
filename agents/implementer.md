@@ -66,6 +66,8 @@ Execute the task exactly as specified:
 - Follow all rules from `spec/.context/rules.md`.
 - Follow all project conventions from `CLAUDE.md`.
 
+If at any point you encounter an ambiguity in the spec that you cannot resolve from the spec, related files, or `CLAUDE.md` alone, stop implementing and take the "Clarification Exit" path described below instead of finishing steps 4–9. Stopping for clarification is the correct move — do not improvise a plausible-looking answer against an unclear spec.
+
 ### 4. Write and Run Tests
 
 - Write tests exactly as specified in the task spec.
@@ -117,6 +119,40 @@ After completing (or skipping) a task, check for more work:
 4. Read the task spec from the phase spec file for the next available task.
 5. If an available task exists AND you estimate you have sufficient context budget remaining → go to step 1 with the new task.
 6. If no tasks available OR context is getting large → proceed to step 8.
+
+### 7b. Clarification Exit (Alternative to Steps 8–9)
+
+Use this path if — and only if — step 3 surfaced a spec ambiguity you could not resolve. Taking this path is preferable to guessing: the coordinator will surface the clarification to the user, the user will update the spec, and a fresh implementer will be respawned for your task_group.
+
+1. Release every file lock you have acquired and your task lock, same as steps 5 and the end of step 6. If you had started editing files, leave them in whatever state they are — the next implementer will read the spec (now clarified) and redo the work from scratch.
+2. Append a clarification entry to `spec/progress.md` (append, never overwrite):
+   ```markdown
+   ## Task {id}: {title} — CLARIFICATION NEEDED
+   - **Agent**: implementer
+   - **Blocker**: {one-line summary of the ambiguity}
+   - **What the spec says**: {quote the ambiguous text verbatim, with its section heading}
+   - **Why it is ambiguous**: {list the two or more plausible readings and what you would need to know to choose one}
+   - **What you checked before stopping**: {related spec sections, CLAUDE.md entries, existing code you reviewed}
+   ```
+3. Call `stop-for-clarification.sh` as your last bash call:
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/stop-for-clarification.sh"
+   ```
+   Do NOT also call `complete-implementer.sh`. The task is not done, and counting it as completed would cause the wave-verifier to try to verify work that does not exist.
+4. Return this report instead of the normal completion report:
+   ```markdown
+   # Clarification Report
+
+   ## Task {id}
+   - **Status**: stopped for clarification
+   - **Ambiguity**: {one-line summary}
+   - **Files touched so far**: {list, or "none"}
+   - See the `CLARIFICATION NEEDED` entry in `spec/progress.md` for full details.
+
+   ## Locks Released: all
+   ```
+
+Stopping for clarification is treated as a good move by the spawn gate: it opens a retry slot on the current batch so the coordinator can respawn a replacement implementer for the same task_group once the user has resolved the ambiguity.
 
 ### 8. Mark Completion (MANDATORY — LAST BASH CALL)
 

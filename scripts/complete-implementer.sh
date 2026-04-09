@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 
-# complete-implementer.sh — Stop hook registered via agents/implementer.md frontmatter
-# Fires only inside the implementer agent's own context, so no agent_type filter
-# is needed. Increments the completed counter on the current batch.
+# complete-implementer.sh — invoked in-band by the implementer agent as its
+# final bash call (see agents/implementer.md step 8). Increments the
+# completed counter on the current active batch.
 #
-# Stop hook input:
-#   stdin — JSON (we do not need to read it)
-#   exit 0 — always (this event cannot block)
+# Usage: bash complete-implementer.sh
+#
+# If an implementer is stopping because the spec is ambiguous rather than
+# because its task is finished, call scripts/stop-for-clarification.sh
+# instead — that path opens a retry slot without marking work as completed,
+# so the verifier will not try to check work that does not exist.
 
 # --- Locate state file ---
 STATE_FILE=""
@@ -23,12 +26,17 @@ if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
   exit 0
 fi
 
-# --- Increment completed counter on current batch ---
+# --- Increment completed counter on current active batch ---
 node -e "(() => {
   const fs = require('fs');
   const s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const batches = s.batches || [];
-  const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);
+  const isBatchDone = (b) => {
+    const gs = b.group_status || {};
+    const groups = b.task_groups || [];
+    return groups.length > 0 && groups.every(g => gs[g] === 'passed');
+  };
+  const batch = batches.find(b => !isBatchDone(b));
   if (batch) {
     batch.completed = (batch.completed || 0) + 1;
     s.last_updated = new Date().toISOString();

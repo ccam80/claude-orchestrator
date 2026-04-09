@@ -4,8 +4,8 @@
 # Blocks verifier spawns when there's nothing new to verify.
 #
 # Spawn conditions (ALL must be true):
-#   1. verifications_passed < len(task_groups)  (not fully verified yet)
-#   2. completed > verifications_passed + verifications_failed  (unreviewed work exists)
+#   1. at least one task_group is not yet "passed" in group_status
+#   2. completed > verifications_passed + verifications_failed (unreviewed work exists)
 #
 # Hook contract:
 #   stdin  — JSON with { tool_name, tool_input }
@@ -47,24 +47,21 @@ result=$(node -e "(() => {
   const fs = require('fs');
   const s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const batches = s.batches || [];
-  const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);
+  const isBatchDone = (b) => {
+    const gs = b.group_status || {};
+    const groups = b.task_groups || [];
+    return groups.length > 0 && groups.every(g => gs[g] === 'passed');
+  };
+  const batch = batches.find(b => !isBatchDone(b));
   if (!batch) {
     console.log('BLOCK:all_batches_verified');
     return;
   }
 
-  const tg = (batch.task_groups || []).length;
   const completed = batch.completed || 0;
   const passed = batch.verifications_passed || 0;
   const failed = batch.verifications_failed || 0;
 
-  // Condition 1: not fully verified
-  if (passed >= tg) {
-    console.log('BLOCK:batch_done:' + batch.id);
-    return;
-  }
-
-  // Condition 2: there must be unreviewed completed work
   if (completed <= passed + failed) {
     console.log('BLOCK:nothing_to_verify:' + batch.id + ':completed=' + completed + ':reviewed=' + (passed + failed));
     return;
