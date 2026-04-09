@@ -8,7 +8,7 @@ hooks:
     - matcher: "Agent"
       hooks:
         - type: command
-          if: "Agent(claude-orchestrator:implementer)"
+          if: "Agent(*)"
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-implementer.sh\""
   PostToolUse:
     - matcher: "Agent"
