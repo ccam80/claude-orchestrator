@@ -79,6 +79,6 @@ if [ "$action" = "ALLOW" ]; then
   exit 0
 fi
 
-echo "BLOCKED: Cannot spawn verifier — $result"
-echo "State file: $STATE_FILE"
+echo "BLOCKED: Cannot spawn verifier — $result" >&2
+echo "State file: $STATE_FILE" >&2
 exit 2

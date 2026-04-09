@@ -53,7 +53,7 @@ result=$(node -e "(() => {
   // Current batch = first where verifications_passed < task_groups count
   const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);
   if (!batch) {
-    console.log('ALLOW:no_active_batch');
+    console.log('ALLOW');
     return;
   }
 
@@ -85,7 +85,7 @@ result=$(node -e "(() => {
   batch.spawned = spawned + 1;
   s.last_updated = new Date().toISOString();
   fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-  console.log('ALLOW:spawned=' + (spawned + 1));
+  console.log('ALLOW');
 })()" "$STATE_FILE" 2>/dev/null || echo "ALLOW:error")
 
 action=$(echo "$result" | cut -d: -f1)
@@ -94,7 +94,7 @@ if [ "$action" = "ALLOW" ]; then
   exit 0
 fi
 
-# --- Blocked — extract reason and report ---
+# --- Blocked — extract reason and report to stderr ---
 info=$(echo "$result" | cut -d: -f2-)
 batch_id=$(node -e "console.log(JSON.parse(process.argv[1]).id)" "$info" 2>/dev/null)
 reason=$(node -e "console.log(JSON.parse(process.argv[1]).reason)" "$info" 2>/dev/null)
@@ -102,14 +102,11 @@ reason=$(node -e "console.log(JSON.parse(process.argv[1]).reason)" "$info" 2>/de
 if [ "$reason" = "spawn_cap" ]; then
   spawned=$(node -e "console.log(JSON.parse(process.argv[1]).spawned)" "$info" 2>/dev/null)
   cap=$(node -e "console.log(JSON.parse(process.argv[1]).cap)" "$info" 2>/dev/null)
-  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap)."
-  echo "Spawn a wave-verifier to verify completed work. Failed verifications add retry slots."
+  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap). Spawn a wave-verifier to verify completed work. Failed verifications add retry slots." >&2
 elif [ "$reason" = "unreviewed_work" ]; then
   completed=$(node -e "console.log(JSON.parse(process.argv[1]).completed)" "$info" 2>/dev/null)
   reviewed=$(node -e "console.log(JSON.parse(process.argv[1]).reviewed)" "$info" 2>/dev/null)
-  echo "BLOCKED: Batch '$batch_id' — completed implementations ($completed) exceed reviews ($reviewed)."
-  echo "Spawn a wave-verifier before spawning more implementers."
+  echo "BLOCKED: Batch '$batch_id' — completed implementations ($completed) exceed reviews ($reviewed). Spawn a wave-verifier before spawning more implementers." >&2
 fi
-echo ""
-echo "State file: $STATE_FILE"
+echo "State file: $STATE_FILE" >&2
 exit 2
