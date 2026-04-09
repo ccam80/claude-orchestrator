@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 
-# gate-implementer.sh — PreToolUse hook for Agent tool
-# Blocks implementer spawns when any batch has completed but not been verified.
+# gate-implementer.sh — PreToolUse hook for claude-orchestrator:implementer
+# Counter-based gate: checks spawn conditions, increments spawned on allow.
 #
-# Registered via implement-hybrid SKILL.md frontmatter (matcher: Agent).
-# The `if` field cannot filter by subagent_type (colons break the pattern),
-# so this script filters internally via tool_input.subagent_type.
+# Spawn conditions (ALL must be true):
+#   1. spawned < len(task_groups) + verifications_failed
+#   2. verifications_passed + verifications_failed >= completed
+#
+# Filters by subagent_type internally (if field can't handle colons).
 #
 # Hook contract:
 #   stdin  — JSON with { tool_name, tool_input }
-#   exit 0 — allow the tool call
-#   exit 2 — block the tool call (stdout shown to agent as reason)
+#   exit 0 — allow
+#   exit 2 — block (stdout shown to agent)
 
-# --- Locate the state file first (cheap bash check before any parsing) ---
+# --- Locate state file (cheap bash check first) ---
 STATE_FILE=""
 dir="$PWD"
 while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
@@ -23,12 +25,11 @@ while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
   dir=$(dirname "$dir")
 done
 
-# No state file → nothing to gate
 if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
   exit 0
 fi
 
-# --- Read stdin and filter by subagent_type ---
+# --- Read stdin, filter by subagent_type ---
 TMPINPUT=$(mktemp)
 trap 'rm -f "$TMPINPUT"' EXIT
 cat > "$TMPINPUT"
@@ -43,38 +44,72 @@ if [ "$is_implementer" != "yes" ]; then
   exit 0
 fi
 
-# --- Check for unverified completed batches ---
-# A batch blocks if: verified=false AND status is NOT "implementing"
-# (implementing means the batch is still in-flight — those are allowed)
-blocked_batch=$(node -e "
-  const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+# --- Find current batch and check conditions ---
+result=$(node -e "(() => {
+  const fs = require('fs');
+  const s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const batches = s.batches || [];
-  const blocker = batches.find(b => !b.verified && b.status !== 'implementing');
-  if (blocker) {
-    console.log(JSON.stringify({ id: blocker.id, status: blocker.status, waves: blocker.waves }));
-  } else {
-    console.log('');
-  }
-" "$STATE_FILE" 2>/dev/null)
 
-if [ -z "$blocked_batch" ]; then
+  // Current batch = first where verifications_passed < task_groups count
+  const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);
+  if (!batch) {
+    console.log('ALLOW:no_active_batch');
+    return;
+  }
+
+  const tg = (batch.task_groups || []).length;
+  const spawned = batch.spawned || 0;
+  const completed = batch.completed || 0;
+  const passed = batch.verifications_passed || 0;
+  const failed = batch.verifications_failed || 0;
+
+  // Condition 1: haven't exceeded slots (initial + retries)
+  if (spawned >= tg + failed) {
+    console.log('BLOCK:' + JSON.stringify({
+      id: batch.id, reason: 'spawn_cap',
+      spawned: spawned, cap: tg + failed, task_groups: tg, failed: failed
+    }));
+    return;
+  }
+
+  // Condition 2: all completed work must be reviewed before spawning more
+  if (completed > 0 && (passed + failed) < completed) {
+    console.log('BLOCK:' + JSON.stringify({
+      id: batch.id, reason: 'unreviewed_work',
+      completed: completed, reviewed: passed + failed
+    }));
+    return;
+  }
+
+  // Allowed — increment spawned counter
+  batch.spawned = spawned + 1;
+  s.last_updated = new Date().toISOString();
+  fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  console.log('ALLOW:spawned=' + (spawned + 1));
+})()" "$STATE_FILE" 2>/dev/null || echo "ALLOW:error")
+
+action=$(echo "$result" | cut -d: -f1)
+
+if [ "$action" = "ALLOW" ]; then
   exit 0
 fi
 
-# Extract fields for the error message
-batch_id=$(node -e "console.log(JSON.parse(process.argv[1]).id)" "$blocked_batch" 2>/dev/null)
-batch_status=$(node -e "console.log(JSON.parse(process.argv[1]).status)" "$blocked_batch" 2>/dev/null)
-batch_waves=$(node -e "console.log(JSON.parse(process.argv[1]).waves.join(', '))" "$blocked_batch" 2>/dev/null)
+# --- Blocked — extract reason and report ---
+info=$(echo "$result" | cut -d: -f2-)
+batch_id=$(node -e "console.log(JSON.parse(process.argv[1]).id)" "$info" 2>/dev/null)
+reason=$(node -e "console.log(JSON.parse(process.argv[1]).reason)" "$info" 2>/dev/null)
 
-echo "BLOCKED: Batch '$batch_id' (waves: $batch_waves) has status='$batch_status' and is not verified."
-echo ""
-echo "You must verify this batch before spawning new implementers."
-echo "Spawn a wave-verifier agent for this batch:"
-echo "  subagent_type: claude-orchestrator:wave-verifier"
-echo "  Include the batch ID, wave/task list, phase spec path, and test command in the prompt."
-echo ""
-echo "The PostToolUse hook on the wave-verifier will set verified=true ONLY if the verifier returns PASS."
-echo "If the verifier returns FAIL, read the Failure Summary and spawn fix agents before re-verifying."
+if [ "$reason" = "spawn_cap" ]; then
+  spawned=$(node -e "console.log(JSON.parse(process.argv[1]).spawned)" "$info" 2>/dev/null)
+  cap=$(node -e "console.log(JSON.parse(process.argv[1]).cap)" "$info" 2>/dev/null)
+  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap)."
+  echo "Spawn a wave-verifier to verify completed work. Failed verifications add retry slots."
+elif [ "$reason" = "unreviewed_work" ]; then
+  completed=$(node -e "console.log(JSON.parse(process.argv[1]).completed)" "$info" 2>/dev/null)
+  reviewed=$(node -e "console.log(JSON.parse(process.argv[1]).reviewed)" "$info" 2>/dev/null)
+  echo "BLOCKED: Batch '$batch_id' — completed implementations ($completed) exceed reviews ($reviewed)."
+  echo "Spawn a wave-verifier before spawning more implementers."
+fi
 echo ""
 echo "State file: $STATE_FILE"
 exit 2

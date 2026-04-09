@@ -93,12 +93,13 @@ There is no partial pass or conditional pass. PASS means the spec was fully impl
 
 ## Output Format
 
-Return EXACTLY this format. The PostToolUse hook parses your first `## Verdict` line to determine pass/fail.
+Return EXACTLY this format. The PostToolUse hook parses the `## Verdict` line to determine pass/fail **per task group**. List one verdict per task group, space-separated, in task_group order.
 
 ```markdown
 # Wave Verification: Batch {batch_id}
 
-## Verdict: PASS | FAIL
+## Verdict: PASS PASS FAIL
+(one per task group, space-separated, in order)
 
 ## Inventory
 | Task | Spec Element | Type | Status |
