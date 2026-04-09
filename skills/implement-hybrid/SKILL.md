@@ -15,7 +15,7 @@ hooks:
 
 # Implement Hybrid
 
-You are the implementation coordinator. You read specs, plan all batches upfront, write the state file once, then spawn agents. Hooks manage all state transitions — you never touch the state file after setup.
+You are the implementation coordinator. You read specs, plan all batches upfront, write the state file once, then spawn agents. A combination of runtime hooks and in-band scripts run by the subagents themselves manage state transitions. You only touch the state file after setup under the dead-subagent fallback described below.
 
 ## Architecture
 
@@ -27,20 +27,33 @@ implement-orchestrated (3 levels):        implement-hybrid (2 levels):
     └─ reviewer
 ```
 
-## Hook-Enforced Verification Gate
+## Verification Gate
 
-Four hooks manage all state transitions. The two PreToolUse gates are registered on this skill's frontmatter; the two completion hooks are registered on the implementer and wave-verifier agent frontmatters, so they fire inside the owning agent's context (no agent_type filter needed):
+Two PreToolUse hooks gate spawns at the Claude Code runtime level; two in-band scripts are invoked by the subagents themselves to record completion:
 
-| Hook | Registered on | Trigger | Action |
-|------|---------------|---------|--------|
-| `gate-implementer.sh` | skill frontmatter | PreToolUse on Agent | Filters on `subagent_type=implementer`; checks spawn conditions, increments `spawned` on allow |
-| `gate-verifier.sh` | skill frontmatter | PreToolUse on Agent | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or batch already done |
-| `complete-implementer.sh` | `agents/implementer.md` | Stop | Increments `completed` when the implementer finishes |
-| `mark-verified.sh` | `agents/wave-verifier.md` | Stop | Parses `## Verdict:` from `last_assistant_message`, increments `passed`/`failed` |
+| Script | Invoked by | When | Action |
+|--------|-----------|------|--------|
+| `gate-implementer.sh` | Claude Code (PreToolUse on Agent, skill frontmatter) | Before each Agent tool call | Filters on `subagent_type=implementer`; checks spawn conditions, increments `spawned` on allow; exit 2 with stderr reason on block |
+| `gate-verifier.sh` | Claude Code (PreToolUse on Agent, skill frontmatter) | Before each Agent tool call | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or batch already done |
+| `complete-implementer.sh` | **implementer agent itself** | As the implementer's final bash call before returning | Increments `completed` on the current batch |
+| `mark-verified.sh` | **wave-verifier agent itself** | As the verifier's final bash call before returning, with the verdict string as arg | Increments `verifications_passed` / `verifications_failed` on the current batch |
 
-**Why per-agent Stop hooks for completions?** `PostToolUse:Agent` fires when the `Agent` tool call *returns* — for `run_in_background: true` that's the moment the task id is handed back, long before the subagent finishes. Skill-level `SubagentStop` hooks were not reliably invoked for background subagents. Registering the completion hook on the agent's own frontmatter as a `Stop` hook fires exactly once inside that agent's own session, after its final assistant message, which is where `last_assistant_message` is populated.
+**Why in-band completion tracking?** Claude Code's `SubagentStop` hooks (whether registered on the skill or on the agent's own frontmatter as `Stop`) are not reliably invoked for background subagents — this is a known issue. `PostToolUse:Agent` fires when the `Agent` tool *returns*, which for `run_in_background: true` is at spawn time, long before the subagent finishes. The only reliable mechanism is to have the subagent invoke the recording script itself as its last action before returning. The implementer and wave-verifier agents' workflows make this mandatory.
 
-**You do not write to the state file after setup.** The hooks own all counter fields. Your only job after setup is to spawn agents and read their output.
+**You do not write counter fields in the state file after setup.** Completion counters are written by the scripts the subagents invoke. The coordinator only writes counters under the dead-subagent fallback (see below).
+
+### Dead-Subagent Fallback
+
+An in-band completion script is only as reliable as the subagent running it. If a subagent dies or hangs before invoking its completion script, its counter never increments and the batch stalls. Recovery protocol when a spawn appears stuck:
+
+1. Look up the subagent's `agentId` from the `TaskOutput` retrieval or the spawn response.
+2. Inspect the subagent's process / output file to determine whether it is actually still running, or dead with no further output. If `TaskOutput` returned a `completed` status but the counter didn't move, the agent finished without running its completion script.
+3. **Only when you have positive evidence the subagent is dead** (`TaskOutput` returned completed/failed, or the process is no longer present), you may manually increment the appropriate counter yourself. Use the smallest possible edit:
+   - For an implementer that died without running `complete-implementer.sh`: increment `batch.completed` by 1.
+   - For a wave-verifier that died without running `mark-verified.sh`: you cannot recover its verdict — spawn a replacement verifier after first bumping `verifications_failed` by the number of task_groups it was assigned, which opens retry slots.
+4. Log the manual intervention in `spec/progress.md` under a **Manual state adjustments** heading with timestamp, batch id, counter, and reason.
+
+Never use this fallback speculatively. A live subagent whose counter simply hasn't updated yet is not dead — wait for `TaskOutput(block=true)` to return before considering intervention.
 
 ### Counter-Based State
 
@@ -65,7 +78,11 @@ The state file `spec/.hybrid-state.json` uses counters, not status fields:
 
 **Fields you write (once, at setup):** `id`, `task_groups`, `tasks`, and the four counters initialized to 0.
 
-**Fields hooks write:** `spawned`, `completed`, `verifications_passed`, `verifications_failed`, `last_updated`.
+**Fields written after setup:**
+- `spawned` — written by `gate-implementer.sh` (PreToolUse hook, automatic).
+- `completed` — written by `complete-implementer.sh` invoked by the implementer agent itself as its last bash call.
+- `verifications_passed` / `verifications_failed` — written by `mark-verified.sh` invoked by the wave-verifier agent itself as its last bash call.
+- `last_updated` — written by whichever of the above runs most recently.
 
 Each **task_group** is one implementer's assignment — the tasks that one agent will work on. The `task_groups` array has one entry per implementer you plan to spawn. The `tasks` array is parallel — `tasks[i]` lists the spec task IDs for `task_groups[i]`.
 
@@ -227,7 +244,7 @@ Read these files before doing anything else:
 - `spec/test-baseline.md` — pre-existing test failures (check before investigating any test failure)
 ```
 
-After spawning all implementers in one message, call `TaskOutput(task_id, block=true)` for each in a follow-up message. The PostToolUse hook increments `completed` as each returns.
+After spawning all implementers in one message, call `TaskOutput(task_id, block=true)` for each in a follow-up message. Each implementer invokes `complete-implementer.sh` as its own final bash call, which increments `completed` on the current batch. When `TaskOutput` returns with `status: completed` for every implementer, re-read `spec/.hybrid-state.json` to confirm `completed` caught up. If an implementer returned completed but the counter did not advance, apply the dead-subagent fallback described at the top of this file.
 
 #### 2. Process Results
 
@@ -284,12 +301,9 @@ Read these files before doing anything else:
 
 **Wait for the verifier to complete** via `TaskOutput(task_id, block=true)`.
 
-The PostToolUse hook parses the verifier's `## Verdict:` line (one verdict per task group, space-separated) and increments `verifications_passed` and `verifications_failed`.
+The wave-verifier invokes `mark-verified.sh "<verdict>"` as its own final bash call, passing its verdict string (space-separated `PASS` / `FAIL` tokens, one per task group, in task_group order). That script increments `verifications_passed` and `verifications_failed` on the current batch.
 
-You will see a hook context message:
-- `"Batch fully verified (N/N passed)"` — proceed to next batch.
-- `"N passed, M failed"` — read the verifier's Failure Summary and spawn fix implementers.
-- `"WARNING"` — verdict unparseable, report to user.
+After `TaskOutput` returns, re-read `spec/.hybrid-state.json` to confirm the counters advanced. If they did not (verifier died before running its recording script), treat the batch as fully failed: bump `verifications_failed` by the task_group count and spawn a replacement verifier. Also cross-check the verifier's returned report `## Verdict:` line against the counters — if they disagree, trust the counters and investigate the discrepancy before proceeding.
 
 #### 4. Handle Verification Failure
 
@@ -369,4 +383,4 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 - Do not verify code yourself. Spawn the wave-verifier agent.
 - The `claude-orchestrator:implementer` agent type loads its instructions automatically.
 - Rely on `spec/progress.md` as source of truth, not on parsing agent output.
-- The hooks manage all counters. You cannot and should not write counter values.
+- The PreToolUse gate owns `spawned`. The implementer and wave-verifier agents own `completed`, `verifications_passed`, and `verifications_failed` via the scripts they invoke in-band. You, the coordinator, only write counter values under the dead-subagent fallback — see the "Dead-Subagent Fallback" section at the top of this file.

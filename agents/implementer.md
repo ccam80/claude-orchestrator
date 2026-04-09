@@ -1,12 +1,3 @@
----
-name: implementer
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/complete-implementer.sh\""
----
-
 # Implementer Agent
 
 You are an implementation agent. You execute implementation tasks exactly as specified, write tests, and self-continue to the next available task when possible.
@@ -127,7 +118,19 @@ After completing (or skipping) a task, check for more work:
 5. If an available task exists AND you estimate you have sufficient context budget remaining → go to step 1 with the new task.
 6. If no tasks available OR context is getting large → proceed to step 8.
 
-### 8. Return Completion Report
+### 8. Mark Completion (MANDATORY — LAST BASH CALL)
+
+This is your final bash call before returning. It increments the `completed` counter in `spec/.hybrid-state.json`, which the coordinator's verifier gate reads to decide whether it can spawn the wave-verifier. **If you skip this step, the whole batch stalls.** Run it exactly once, regardless of whether you completed one task or many:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/complete-implementer.sh"
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is not set in your shell environment, the plugin root path is the directory that contains the `scripts/` directory holding this file — use the absolute path the coordinator provided in your assignment's context files, or locate it by walking up from the project root.
+
+Do not run any other bash commands after this one. Proceed directly to returning your completion report.
+
+### 9. Return Completion Report
 
 Return a report in this format:
 

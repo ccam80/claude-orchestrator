@@ -1,22 +1,21 @@
 #!/usr/bin/env bash
 
-# mark-verified.sh — Stop hook registered via agents/wave-verifier.md frontmatter
-# Fires only inside the wave-verifier agent's own context, so no agent_type
-# filter is needed. Parses per-task-group verdicts from the verifier's final
-# assistant message and increments verifications_passed / verifications_failed.
+# mark-verified.sh — invoked in-band by the wave-verifier agent as its final
+# bash call. Takes the verdict string as its sole positional argument and
+# increments verifications_passed / verifications_failed on the current batch.
 #
-# Stop hook input:
-#   stdin — JSON with { last_assistant_message, ... }
-#   exit 0 — always (this event cannot block)
+# Usage:
+#   bash mark-verified.sh "PASS PASS FAIL"
 #
-# Expected verifier output format:
-#   ## Verdict: PASS PASS FAIL
-# (space-separated, one per task_group in order)
+# The verdict argument must be a space-separated list of PASS / FAIL tokens,
+# one per task_group, in task_group order.
 
-# --- Read stdin ---
-TMPINPUT=$(mktemp)
-trap 'rm -f "$TMPINPUT"' EXIT
-cat > "$TMPINPUT"
+VERDICT_STRING="$1"
+
+if [ -z "$VERDICT_STRING" ]; then
+  echo "mark-verified: ERROR — verdict string argument is required (e.g. \"PASS PASS FAIL\")" >&2
+  exit 1
+fi
 
 # --- Locate state file ---
 STATE_FILE=""
@@ -30,33 +29,32 @@ while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
 done
 
 if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
-  exit 0
+  echo "mark-verified: ERROR — could not locate spec/.hybrid-state.json above $PWD" >&2
+  exit 1
 fi
 
-# --- Parse per-group verdicts and update counters ---
+# --- Parse verdict tokens and update counters ---
 result=$(node -e "(() => {
   const fs = require('fs');
-  const input = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-  const stateFile = process.argv[2];
+  const stateFile = process.argv[1];
+  const verdictArg = process.argv[2] || '';
 
-  const msg = input.last_assistant_message || '';
-  const match = msg.match(/##\\s*Verdict:\\s*((?:PASS|FAIL)(?:\\s+(?:PASS|FAIL))*)/i);
-
-  if (!match) {
-    console.log('WARNING:Could not parse verdict line from verifier output.');
+  const tokens = verdictArg.trim().toUpperCase().split(/\\s+/).filter(Boolean);
+  const valid = tokens.every(t => t === 'PASS' || t === 'FAIL');
+  if (tokens.length === 0 || !valid) {
+    console.log('ERROR:Invalid verdict string. Expected space-separated PASS/FAIL tokens.');
     return;
   }
 
-  const verdicts = match[1].toUpperCase().split(/\\s+/);
-  const newPassed = verdicts.filter(v => v === 'PASS').length;
-  const newFailed = verdicts.filter(v => v === 'FAIL').length;
+  const newPassed = tokens.filter(t => t === 'PASS').length;
+  const newFailed = tokens.filter(t => t === 'FAIL').length;
 
   const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   const batches = s.batches || [];
   const batch = batches.find(b => (b.verifications_passed || 0) < (b.task_groups || []).length);
 
   if (!batch) {
-    console.log('WARNING:No active batch found to update.');
+    console.log('ERROR:No active batch found to update.');
     return;
   }
 
@@ -78,7 +76,7 @@ result=$(node -e "(() => {
     task_groups: tg,
     batch_complete: done
   }));
-})()" "$TMPINPUT" "$STATE_FILE" 2>/dev/null || echo "WARNING:node error")
+})()" "$STATE_FILE" "$VERDICT_STRING" 2>/dev/null || echo "ERROR:node error")
 
 action=$(echo "$result" | cut -d: -f1)
 
@@ -92,14 +90,14 @@ if [ "$action" = "OK" ]; then
   batch_id=$(node -e "console.log(JSON.parse(process.argv[1]).batch)" "$info" 2>/dev/null)
 
   if [ "$batch_complete" = "true" ]; then
-    echo "hook success: Batch '$batch_id' fully verified ($total_passed/$tg passed). Proceed to next batch."
+    echo "mark-verified: Batch '$batch_id' fully verified ($total_passed/$tg passed)."
   elif [ "$new_failed" != "0" ]; then
-    echo "hook success: Verification recorded — $new_passed passed, $new_failed failed ($total_passed/$tg total). Spawn fix implementers for failed groups, then re-verify."
+    echo "mark-verified: Recorded — $new_passed passed, $new_failed failed ($total_passed/$tg total)."
   else
-    echo "hook success: Verification recorded — $new_passed passed ($total_passed/$tg total)."
+    echo "mark-verified: Recorded — $new_passed passed ($total_passed/$tg total)."
   fi
-else
-  echo "hook success: $result"
+  exit 0
 fi
 
-exit 0
+echo "mark-verified: $result" >&2
+exit 1
