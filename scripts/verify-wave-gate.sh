@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
-# verify-wave-gate.sh — PreToolUse hook for Agent tool
+# verify-wave-gate.sh — PreToolUse hook for Agent tool (skill-scoped)
 # Blocks implementer spawns when the previous wave has not been verified.
+#
+# Registered via implement-hybrid SKILL.md frontmatter — only fires during
+# that skill's lifecycle. No global overhead.
 #
 # Hook contract:
 #   stdin  — JSON with { tool_name, tool_input }
@@ -11,6 +14,22 @@
 # State machine (spec/.hybrid-state.json → status field):
 #   implementing → wave_complete → verifying → verified ──→ (next wave)
 #                                           → failed → fixing → verifying …
+
+# --- Locate the state file first (cheap bash check before any node work) ---
+STATE_FILE=""
+dir="$PWD"
+while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
+  if [ -f "$dir/spec/.hybrid-state.json" ]; then
+    STATE_FILE="$dir/spec/.hybrid-state.json"
+    break
+  fi
+  dir=$(dirname "$dir")
+done
+
+# No state file → first wave, nothing to gate
+if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
+  exit 0
+fi
 
 # --- Read hook input from stdin into a temp file (avoids heredoc issues on Windows) ---
 TMPINPUT=$(mktemp)
@@ -32,23 +51,6 @@ is_implementer=$(node -e "
 " "$TMPINPUT" 2>/dev/null || echo "no")
 
 if [ "$is_implementer" != "yes" ]; then
-  exit 0
-fi
-
-# --- Locate the state file ---
-# Walk up from cwd to find spec/.hybrid-state.json (supports being invoked from subdirs)
-STATE_FILE=""
-dir="$PWD"
-while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
-  if [ -f "$dir/spec/.hybrid-state.json" ]; then
-    STATE_FILE="$dir/spec/.hybrid-state.json"
-    break
-  fi
-  dir=$(dirname "$dir")
-done
-
-# No state file → first wave, nothing to gate
-if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
   exit 0
 fi
 

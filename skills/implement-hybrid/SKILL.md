@@ -3,6 +3,12 @@ name: implement-hybrid
 description: Execute implementation by spawning implementers directly with state-based coordination. Eliminates the orchestrator management layer for better context efficiency while preserving spec-contract enforcement.
 argument-hint: <phase name or number, or blank for all>
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskOutput, AskUserQuestion]
+hooks:
+  PreToolUse:
+    - matcher: "Agent"
+      hooks:
+        - type: command
+          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/verify-wave-gate.sh\""
 ---
 
 # Implement Hybrid
@@ -61,22 +67,7 @@ Savings per wave:
 
 ### Verification Gate Hook
 
-This plugin includes a PreToolUse hook (`scripts/verify-wave-gate.sh`) that acts as a hard safety net. It blocks implementer agent spawns whenever `spec/.hybrid-state.json` shows an unverified wave. This catches the coordinator even after context compression.
-
-Register this hook in the consuming project's `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Agent",
-        "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/verify-wave-gate.sh\""
-      }
-    ]
-  }
-}
-```
+This skill registers a PreToolUse hook (`scripts/verify-wave-gate.sh`) via frontmatter — it fires automatically during implement-hybrid execution only. No manual registration needed. The hook blocks implementer agent spawns whenever `spec/.hybrid-state.json` shows an unverified wave, catching the coordinator even after context compression.
 
 **State machine** enforced by the hook and the coordinator:
 ```
