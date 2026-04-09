@@ -9,8 +9,8 @@
 #
 # Hook contract:
 #   stdin  — JSON with { tool_name, tool_input }
-#   exit 0 — allow
-#   exit 2 — block
+#   exit 0 — allow (silent: no stdout, no stderr)
+#   exit 2 — block, block reason on STDOUT (Claude Code feeds stdout to the agent)
 
 # --- Locate state file ---
 STATE_FILE=""
@@ -79,6 +79,6 @@ if [ "$action" = "ALLOW" ]; then
   exit 0
 fi
 
-echo "BLOCKED: Cannot spawn verifier — $result" >&2
-echo "State file: $STATE_FILE" >&2
+echo "BLOCKED: Cannot spawn verifier — $result"
+echo "State file: $STATE_FILE"
 exit 2
