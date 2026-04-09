@@ -78,14 +78,20 @@
   "hotPaths": [
     {
       "path": "skills\\implement-hybrid\\SKILL.md",
-      "accessCount": 21,
-      "lastAccessed": 1775703934231,
+      "accessCount": 24,
+      "lastAccessed": 1775705459653,
       "type": "file"
     },
     {
       "path": "scripts\\verify-wave-gate.sh",
       "accessCount": 8,
       "lastAccessed": 1775700200647,
+      "type": "file"
+    },
+    {
+      "path": "spec\\phase-1-test-file-creation.md",
+      "accessCount": 5,
+      "lastAccessed": 1775705082509,
       "type": "file"
     },
     {
@@ -101,6 +107,36 @@
       "type": "file"
     },
     {
+      "path": "CLAUDE.md",
+      "accessCount": 4,
+      "lastAccessed": 1775705082738,
+      "type": "directory"
+    },
+    {
+      "path": "spec\\progress.md",
+      "accessCount": 4,
+      "lastAccessed": 1775705147091,
+      "type": "file"
+    },
+    {
+      "path": "spec\\.hybrid-state.json",
+      "accessCount": 4,
+      "lastAccessed": 1775705167000,
+      "type": "file"
+    },
+    {
+      "path": "scripts\\gate-implementer.sh",
+      "accessCount": 4,
+      "lastAccessed": 1775705401144,
+      "type": "file"
+    },
+    {
+      "path": "scripts\\mark-verified.sh",
+      "accessCount": 4,
+      "lastAccessed": 1775705406837,
+      "type": "file"
+    },
+    {
       "path": ".claude\\settings.local.json",
       "accessCount": 3,
       "lastAccessed": 1775699780559,
@@ -113,6 +149,18 @@
       "type": "file"
     },
     {
+      "path": "spec\\plan.md",
+      "accessCount": 3,
+      "lastAccessed": 1775705024820,
+      "type": "file"
+    },
+    {
+      "path": "spec\\test-baseline.md",
+      "accessCount": 3,
+      "lastAccessed": 1775705083282,
+      "type": "file"
+    },
+    {
       "path": "agents\\orchestrator.md",
       "accessCount": 2,
       "lastAccessed": 1775699061514,
@@ -122,6 +170,24 @@
       "path": "references\\rules.md",
       "accessCount": 2,
       "lastAccessed": 1775702954032,
+      "type": "file"
+    },
+    {
+      "path": "spec\\.context\\rules.md",
+      "accessCount": 2,
+      "lastAccessed": 1775705080507,
+      "type": "file"
+    },
+    {
+      "path": "spec\\.context\\lock-protocol.md",
+      "accessCount": 2,
+      "lastAccessed": 1775705080541,
+      "type": "file"
+    },
+    {
+      "path": "src\\hello.js",
+      "accessCount": 2,
+      "lastAccessed": 1775705112994,
       "type": "file"
     },
     {
@@ -155,45 +221,15 @@
       "type": "file"
     },
     {
-      "path": "scripts\\gate-implementer.sh",
-      "accessCount": 1,
-      "lastAccessed": 1775703770065,
-      "type": "file"
-    },
-    {
-      "path": "scripts\\mark-verified.sh",
-      "accessCount": 1,
-      "lastAccessed": 1775703786464,
-      "type": "file"
-    },
-    {
       "path": "",
       "accessCount": 1,
       "lastAccessed": 1775703935143,
       "type": "directory"
     },
     {
-      "path": "CLAUDE.md",
+      "path": "test\\hello.test.js",
       "accessCount": 1,
-      "lastAccessed": 1775703941876,
-      "type": "directory"
-    },
-    {
-      "path": "spec\\plan.md",
-      "accessCount": 1,
-      "lastAccessed": 1775704710649,
-      "type": "file"
-    },
-    {
-      "path": "spec\\phase-1-test-file-creation.md",
-      "accessCount": 1,
-      "lastAccessed": 1775704715486,
-      "type": "file"
-    },
-    {
-      "path": "spec\\progress.md",
-      "accessCount": 1,
-      "lastAccessed": 1775704716094,
+      "lastAccessed": 1775705102922,
       "type": "file"
     }
   ],

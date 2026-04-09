@@ -35,10 +35,55 @@
       "status": "completed",
       "completed_at": "2026-04-09T02:42:05.248Z",
       "duration_ms": 26542
+    },
+    {
+      "agent_id": "a4d730f46880c5d40",
+      "agent_type": "general-purpose",
+      "started_at": "2026-04-09T03:23:42.168Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-04-09T03:24:10.003Z",
+      "duration_ms": 27835
+    },
+    {
+      "agent_id": "aad1a75e3097f7b29",
+      "agent_type": "claude-orchestrator:implementer",
+      "started_at": "2026-04-09T03:24:35.418Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-04-09T03:25:23.065Z",
+      "duration_ms": 47647
+    },
+    {
+      "agent_id": "af2ad34006d5e3045",
+      "agent_type": "claude-orchestrator:implementer",
+      "started_at": "2026-04-09T03:24:37.746Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-04-09T03:25:42.199Z",
+      "duration_ms": 64453
+    },
+    {
+      "agent_id": "aebcecba76f3d3faa",
+      "agent_type": "claude-orchestrator:implementer",
+      "started_at": "2026-04-09T03:26:12.990Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-04-09T03:26:16.370Z",
+      "duration_ms": 3380
+    },
+    {
+      "agent_id": "ab255309e601f392d",
+      "agent_type": "claude-code-guide",
+      "started_at": "2026-04-09T03:28:04.537Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-04-09T03:29:37.855Z",
+      "duration_ms": 93318
     }
   ],
-  "total_spawned": 4,
-  "total_completed": 4,
+  "total_spawned": 9,
+  "total_completed": 9,
   "total_failed": 0,
-  "last_updated": "2026-04-09T02:42:05.351Z"
+  "last_updated": "2026-04-09T03:29:37.960Z"
 }
