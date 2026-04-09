@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+# DEBUG: capture runtime context for diagnosis
+{
+  echo "=== $(date -Iseconds) gate-implementer.sh invoked ==="
+  echo "PWD=$PWD"
+  echo "CLAUDE_PLUGIN_ROOT=${CLAUDE_PLUGIN_ROOT:-unset}"
+  echo "BASH_VERSION=$BASH_VERSION"
+  echo "Shell: $0"
+  echo "Args: $*"
+} >> /tmp/hook-debug.log
+
 # gate-implementer.sh — PreToolUse hook for claude-orchestrator:implementer
 # Counter-based gate: checks spawn conditions, increments spawned on allow.
 #
@@ -33,6 +43,12 @@ fi
 TMPINPUT=$(mktemp)
 trap 'rm -f "$TMPINPUT"' EXIT
 cat > "$TMPINPUT"
+{
+  echo "STATE_FILE=$STATE_FILE"
+  echo "STDIN (first 500 chars):"
+  head -c 500 "$TMPINPUT"
+  echo ""
+} >> /tmp/hook-debug.log
 
 is_implementer=$(node -e "
   const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
@@ -89,8 +105,10 @@ result=$(node -e "(() => {
 })()" "$STATE_FILE" 2>/dev/null || echo "ALLOW:error")
 
 action=$(echo "$result" | cut -d: -f1)
+echo "RESULT=$result ACTION=$action" >> /tmp/hook-debug.log
 
 if [ "$action" = "ALLOW" ]; then
+  echo "EXIT=0 (allow)" >> /tmp/hook-debug.log
   exit 0
 fi
 
