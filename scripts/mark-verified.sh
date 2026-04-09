@@ -1,31 +1,22 @@
 #!/usr/bin/env bash
 
-# mark-verified.sh — SubagentStop hook for claude-orchestrator:wave-verifier
-# Parses per-task-group verdicts from the verifier's final assistant message,
-# and increments verifications_passed / verifications_failed counters.
+# mark-verified.sh — Stop hook registered via agents/wave-verifier.md frontmatter
+# Fires only inside the wave-verifier agent's own context, so no agent_type
+# filter is needed. Parses per-task-group verdicts from the verifier's final
+# assistant message and increments verifications_passed / verifications_failed.
 #
-# SubagentStop input:
-#   stdin — JSON with { agent_type, last_assistant_message, ... }
+# Stop hook input:
+#   stdin — JSON with { last_assistant_message, ... }
 #   exit 0 — always (this event cannot block)
 #
 # Expected verifier output format:
 #   ## Verdict: PASS PASS FAIL
 # (space-separated, one per task_group in order)
 
-# --- Read stdin, filter by agent_type ---
+# --- Read stdin ---
 TMPINPUT=$(mktemp)
 trap 'rm -f "$TMPINPUT"' EXIT
 cat > "$TMPINPUT"
-
-is_verifier=$(node -e "
-  const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-  const t = j.agent_type || '';
-  console.log(t === 'claude-orchestrator:wave-verifier' ? 'yes' : 'no');
-" "$TMPINPUT" 2>/dev/null || echo "no")
-
-if [ "$is_verifier" != "yes" ]; then
-  exit 0
-fi
 
 # --- Locate state file ---
 STATE_FILE=""

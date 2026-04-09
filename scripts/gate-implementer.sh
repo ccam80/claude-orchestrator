@@ -12,7 +12,7 @@
 # Hook contract:
 #   stdin  — JSON with { tool_name, tool_input }
 #   exit 0 — allow (silent: no stdout, no stderr)
-#   exit 2 — block, block reason on STDOUT (Claude Code feeds stdout to the agent)
+#   exit 2 — block, block reason on STDERR (Claude Code surfaces stderr on exit 2)
 
 # --- Locate state file (cheap bash check first) ---
 STATE_FILE=""
@@ -102,11 +102,11 @@ reason=$(node -e "console.log(JSON.parse(process.argv[1]).reason)" "$info" 2>/de
 if [ "$reason" = "spawn_cap" ]; then
   spawned=$(node -e "console.log(JSON.parse(process.argv[1]).spawned)" "$info" 2>/dev/null)
   cap=$(node -e "console.log(JSON.parse(process.argv[1]).cap)" "$info" 2>/dev/null)
-  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap). Spawn a wave-verifier to verify completed work. Failed verifications add retry slots."
+  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap). Spawn a wave-verifier to verify completed work. Failed verifications add retry slots." >&2
 elif [ "$reason" = "unreviewed_work" ]; then
   completed=$(node -e "console.log(JSON.parse(process.argv[1]).completed)" "$info" 2>/dev/null)
   reviewed=$(node -e "console.log(JSON.parse(process.argv[1]).reviewed)" "$info" 2>/dev/null)
-  echo "BLOCKED: Batch '$batch_id' — completed implementations ($completed) exceed reviews ($reviewed). Spawn a wave-verifier before spawning more implementers."
+  echo "BLOCKED: Batch '$batch_id' — completed implementations ($completed) exceed reviews ($reviewed). Spawn a wave-verifier before spawning more implementers." >&2
 fi
-echo "State file: $STATE_FILE"
+echo "State file: $STATE_FILE" >&2
 exit 2

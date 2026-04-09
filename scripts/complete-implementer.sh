@@ -1,30 +1,12 @@
 #!/usr/bin/env bash
 
-# complete-implementer.sh — SubagentStop hook for claude-orchestrator:implementer
-# Increments the completed counter on the current batch when an implementer finishes.
+# complete-implementer.sh — Stop hook registered via agents/implementer.md frontmatter
+# Fires only inside the implementer agent's own context, so no agent_type filter
+# is needed. Increments the completed counter on the current batch.
 #
-# SubagentStop input:
-#   stdin — JSON with { agent_type, last_assistant_message, ... }
+# Stop hook input:
+#   stdin — JSON (we do not need to read it)
 #   exit 0 — always (this event cannot block)
-#
-# We filter by agent_type inside the script; the PostToolUse-era bug where
-# the hook fired at spawn-time (tool_response empty) does not apply here —
-# SubagentStop fires only after the subagent has fully finished.
-
-# --- Read stdin, filter by agent_type ---
-TMPINPUT=$(mktemp)
-trap 'rm -f "$TMPINPUT"' EXIT
-cat > "$TMPINPUT"
-
-is_implementer=$(node -e "
-  const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-  const t = j.agent_type || '';
-  console.log(t === 'claude-orchestrator:implementer' ? 'yes' : 'no');
-" "$TMPINPUT" 2>/dev/null || echo "no")
-
-if [ "$is_implementer" != "yes" ]; then
-  exit 0
-fi
 
 # --- Locate state file ---
 STATE_FILE=""

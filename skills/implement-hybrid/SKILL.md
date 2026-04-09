@@ -11,12 +11,6 @@ hooks:
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-implementer.sh\""
         - type: command
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-verifier.sh\""
-  SubagentStop:
-    - hooks:
-        - type: command
-          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/complete-implementer.sh\""
-        - type: command
-          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mark-verified.sh\""
 ---
 
 # Implement Hybrid
@@ -35,16 +29,16 @@ implement-orchestrated (3 levels):        implement-hybrid (2 levels):
 
 ## Hook-Enforced Verification Gate
 
-Four hooks registered via frontmatter manage all state transitions:
+Four hooks manage all state transitions. The two PreToolUse gates are registered on this skill's frontmatter; the two completion hooks are registered on the implementer and wave-verifier agent frontmatters, so they fire inside the owning agent's context (no agent_type filter needed):
 
-| Hook | Trigger | Action |
-|------|---------|--------|
-| `gate-implementer.sh` | PreToolUse on Agent | Filters on `subagent_type=implementer`; checks spawn conditions, increments `spawned` on allow |
-| `gate-verifier.sh` | PreToolUse on Agent | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or batch already done |
-| `complete-implementer.sh` | SubagentStop | Filters on `agent_type=implementer`; increments `completed` after the implementer actually finishes |
-| `mark-verified.sh` | SubagentStop | Filters on `agent_type=wave-verifier`; parses `## Verdict:` from `last_assistant_message`, increments `passed`/`failed` |
+| Hook | Registered on | Trigger | Action |
+|------|---------------|---------|--------|
+| `gate-implementer.sh` | skill frontmatter | PreToolUse on Agent | Filters on `subagent_type=implementer`; checks spawn conditions, increments `spawned` on allow |
+| `gate-verifier.sh` | skill frontmatter | PreToolUse on Agent | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or batch already done |
+| `complete-implementer.sh` | `agents/implementer.md` | Stop | Increments `completed` when the implementer finishes |
+| `mark-verified.sh` | `agents/wave-verifier.md` | Stop | Parses `## Verdict:` from `last_assistant_message`, increments `passed`/`failed` |
 
-**Why SubagentStop for completions?** `PostToolUse:Agent` fires when the `Agent` tool call *returns* — for `run_in_background: true` that's the moment the task id is handed back, long before the subagent finishes. At that point `tool_response` has no verifier verdict to parse. `SubagentStop` fires only when the subagent is actually done and exposes `last_assistant_message` directly for verdict parsing.
+**Why per-agent Stop hooks for completions?** `PostToolUse:Agent` fires when the `Agent` tool call *returns* — for `run_in_background: true` that's the moment the task id is handed back, long before the subagent finishes. Skill-level `SubagentStop` hooks were not reliably invoked for background subagents. Registering the completion hook on the agent's own frontmatter as a `Stop` hook fires exactly once inside that agent's own session, after its final assistant message, which is where `last_assistant_message` is populated.
 
 **You do not write to the state file after setup.** The hooks own all counter fields. Your only job after setup is to spawn agents and read their output.
 
