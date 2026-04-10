@@ -8,15 +8,14 @@ You are operating within the claude-orchestrator plugin. This plugin manages str
 - **plan-orchestrated** — generate a high-level implementation plan with phases, waves, and verification measures
 - **plan-spec** — produce a detailed implementation spec for a single phase
 - **review-spec** — review phase specs for quality, consistency, and implementability before implementation
-- **implement-hybrid** — spawn implementers directly (2-level architecture, ~40-60% better context efficiency). **Recommended with oh-my-claudecode.**
-- **implement-orchestrated** — spawn orchestrator + implementer agents (3-level architecture). Works without oh-my-claudecode.
+- **implement-hybrid** — 2-level coordinator → implementer architecture with state-file coordination, in-band recording scripts, and a wave-verifier gate per batch
 - **review-orchestrated** — review completed implementation against specs and rules
 
 ### Agents (spawned by skills)
-- **implementer** — executes tasks as specified, writes tests, self-continues to next task
-- **orchestrator** — manages a wave of implementers (used only by implement-orchestrated)
-- **reviewer** — audits implementation against specs and rules, reports findings
-- **review-spec** — audits a phase spec for coverage, consistency, completeness, concreteness, implementability
+- **implementer** — executes tasks as specified, writes tests, self-continues to next task. Spawned by `implement-hybrid`.
+- **wave-verifier** — audits each batch for spec coverage, rule compliance, and test regressions; records PASS/FAIL per task_group in `spec/.hybrid-state.json` via `mark-verified.sh`. Spawned by `implement-hybrid`.
+- **reviewer** — audits completed phases against specs and rules, reports findings. Spawned by `review-orchestrated`.
+- **review-spec** — audits a phase spec for coverage, consistency, completeness, concreteness, implementability. Spawned by `review-spec`.
 
 ## Core Principles
 

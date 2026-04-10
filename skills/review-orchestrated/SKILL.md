@@ -20,7 +20,7 @@ You are the top-level review coordinator. You read specs, spawn reviewer agents 
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" review "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
    ```
-   This copies rules and reviewer files to `spec/.context/` in a single command. Do NOT read the agent files yourself — the script handles it. Safe to run even if files already exist from `implement-orchestrated`.
+   This copies rules and reviewer files to `spec/.context/` in a single command. Do NOT read the agent files yourself — the script handles it. The script always overwrites, so it is safe to run even if `spec/.context/` already exists from a prior `implement-hybrid` run.
 7. If `$ARGUMENTS` specifies a phase, limit the review to that phase. Otherwise review all phases that have at least one completed task in `spec/progress.md`.
 
 ## Review Execution
@@ -149,7 +149,7 @@ This project runs on Windows with Git Bash. All bash commands (including the mat
 
 ## Important
 
-- You MUST run the materialize script during setup (step 6). It always overwrites, so it's safe to run after `implement-orchestrated`.
+- You MUST run the materialize script during setup (step 6). It always overwrites, so it is safe to run after `implement-hybrid`.
 - Read `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md` once at the start to get the reviewer prompt template. Do not memorize it — refer back to the file when constructing each prompt.
 - All reviewer prompts are lean pointers to `spec/.context/`. Never embed agent instructions or rules in prompts.
 - Never fix non-mechanical violations without user direction.

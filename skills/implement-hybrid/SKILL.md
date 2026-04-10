@@ -323,6 +323,7 @@ Use this prompt template:
 - **Phase spec file**: spec/phase-{n}-{name}.md
 - **Unreviewed task_groups to verify in this run**: {unreviewed_task_group_list}
 - **Tasks per group**: {tasks_per_group restricted to unreviewed groups}
+- **Test Command**" {test command from CLAUDE.md including usage hints if they exist}
 
 Verify ONLY the task_groups listed above. Do NOT emit a verdict for any task_group that is not in this list — those are already passed and re-verifying them is a counter-corruption bug the state file will reject.
 

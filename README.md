@@ -4,7 +4,7 @@ A Claude Code plugin for structured planning and parallel implementation of soft
 
 ## Skills (User-Invocable Commands)
 
-The plugin provides six skills, organized into three workflows:
+The plugin provides five skills, organized into three workflows:
 
 ### Planning
 
@@ -17,8 +17,7 @@ The plugin provides six skills, organized into three workflows:
 
 | Skill | Command | Purpose |
 |-------|---------|---------|
-| **implement-hybrid** | `/claude-orchestrator:implement-hybrid` | Spawn implementers directly with state-based coordination. Two-level architecture (coordinator → implementers) for ~40-60% better context efficiency. **Recommended if you have [oh-my-claudecode](https://github.com/nicobailon/oh-my-claudecode) installed.** |
-| **implement-orchestrated** | `/claude-orchestrator:implement-orchestrated` | Spawn orchestrator and implementer agents in a three-level architecture (coordinator → orchestrator → implementers). Works without oh-my-claudecode. |
+| **implement-hybrid** | `/claude-orchestrator:implement-hybrid` | Coordinator spawns implementers directly, then spawns a wave-verifier after each batch. Two-level architecture with state-file coordination (`spec/.hybrid-state.json`), PreToolUse spawn gates, and in-band recording scripts run by the subagents themselves. |
 
 ### Review
 
@@ -33,9 +32,9 @@ Agents are spawned by skills — you don't invoke them directly. Each agent has 
 
 | Agent | Used By | Role |
 |-------|---------|------|
-| **implementer** | implement-hybrid, implement-orchestrated | Executes implementation tasks exactly as specified, writes tests, self-continues to next available task. Uses file-level locking for parallel coordination. |
-| **orchestrator** | implement-orchestrated | Manages a single wave of implementation tasks by spawning and monitoring implementer agents. Eliminated in implement-hybrid for better context efficiency. |
-| **reviewer** | implement-hybrid, implement-orchestrated, review-orchestrated | Audits implementation output against specs, rules, and quality standards. Investigates and reports — never fixes. |
+| **implementer** | implement-hybrid | Executes implementation tasks exactly as specified, writes tests, self-continues to next available task. Uses file-level locking for parallel coordination. Calls `complete-implementer.sh` (or `stop-for-clarification.sh`) as its final bash call to record state. |
+| **wave-verifier** | implement-hybrid | After each batch completes, audits every spec element against implementation, scans for rule violations, and runs the test suite against the pre-batch baseline. Emits a `PASS`/`FAIL` verdict per task_group and records it via `mark-verified.sh`. The coordinator's spawn gate blocks the next batch until every task_group has `group_status == "passed"`. |
+| **reviewer** | review-orchestrated | Audits a completed phase against specs, rules, and code quality standards. Investigates and reports — never fixes. |
 | **review-spec** | review-spec | Audits a single phase spec for plan coverage, internal consistency, completeness, concreteness, and implementability. |
 
 ## Typical Workflow
@@ -44,23 +43,41 @@ Agents are spawned by skills — you don't invoke them directly. Each agent has 
 1. Plan        /claude-orchestrator:plan-orchestrated "add user authentication"
 2. Spec        /claude-orchestrator:plan-spec 1          (repeat per phase)
 3. Review      /claude-orchestrator:review-spec          (optional, catches spec issues early)
-4. Implement   /claude-orchestrator:implement-hybrid     (or implement-orchestrated)
-5. Review      /claude-orchestrator:review-orchestrated   (catches rule violations, weak tests)
+4. Implement   /claude-orchestrator:implement-hybrid     (per-batch wave-verifier gate)
+5. Review      /claude-orchestrator:review-orchestrated  (catches rule violations, weak tests)
 ```
 
-## implement-hybrid vs implement-orchestrated
+## Implementation Architecture
 
-| Aspect | implement-hybrid | implement-orchestrated |
-|--------|-----------------|----------------------|
-| Architecture | 2-level (coordinator → implementers) | 3-level (coordinator → orchestrator → implementers) |
-| Context efficiency | ~40-60% better | Baseline |
-| Recovery | State file (`spec/.hybrid-state.json`) enables mid-run resume | Relies on `spec/progress.md` |
-| Dependency | Works best with oh-my-claudecode | Works standalone |
-| Materialized files | 3 (rules, lock-protocol, reviewer) | 5 (+ orchestrator, implementer) |
+`implement-hybrid` is a two-level orchestration model:
 
-**Use implement-hybrid** if you have oh-my-claudecode installed. It eliminates the orchestrator middle layer, saving ~4,700 tokens of agent file reads and ~1,500 tokens of monitoring context per implementer round.
+```
+coordinator (the skill instance)
+  ├─ implementers (one per task_group, background Tasks)
+  └─ wave-verifier (one per batch, after implementers complete)
+```
 
-**Use implement-orchestrated** if you're running vanilla Claude Code without oh-my-claudecode.
+**Batches and task_groups.** The coordinator reads the phase spec, groups parallel waves into batches (sequential waves each get their own batch), and assigns tasks to task_groups — one task_group per implementer (`min(tasks, 4)` per batch).
+
+**State file (`spec/.hybrid-state.json`).** Written once by the coordinator at setup, then updated exclusively by scripts invoked by the subagents themselves. Combines per-batch counters with a `group_status` map (`pending`/`failed`/`passed`) per task_group. Persists across context compressions — if the coordinator is resumed mid-run, it re-reads the state file and picks up on the first batch whose `group_status` has any entry that is not `"passed"`.
+
+**Spawn gates.** Two PreToolUse hooks enforce the workflow at the Claude Code runtime level:
+- `gate-implementer.sh` — allows an implementer spawn iff slot cap not exceeded and all completed work has been reviewed.
+- `gate-verifier.sh` — allows a wave-verifier spawn iff unreviewed completed work exists and the batch is not fully verified.
+
+The coordinator cannot work around a block by editing the state file; the hooks read it every time.
+
+**In-band recording scripts.** Ownership of every state field is fixed:
+
+| Field | Writer | Trigger |
+|-------|--------|---------|
+| `spawned` | `gate-implementer.sh` | PreToolUse on Agent |
+| `completed` | `complete-implementer.sh` | Implementer's final bash call (normal finish) |
+| `stops_for_clarification` | `stop-for-clarification.sh` | Implementer's final bash call (clarification exit) |
+| `verifications_passed` / `verifications_failed` / `group_status` | `mark-verified.sh` | Wave-verifier's final bash call with a JSON verdict map |
+| `dead_implementers` / `dead_verifiers` | `mark-dead-implementer.sh` / `mark-dead-verifier.sh` | Coordinator invokes under the dead-subagent fallback |
+
+See `skills/implement-hybrid/SKILL.md` for the full protocol including the dead-subagent fallback, clarification exits, and spawn condition formulas.
 
 ## Project Structure
 
@@ -68,12 +85,11 @@ Agents are spawned by skills — you don't invoke them directly. Each agent has 
 claude-orchestrator/
   agents/                    # Agent instruction files
     implementer.md
-    orchestrator.md
+    wave-verifier.md
     reviewer.md
     review-spec.md
   skills/                    # Skill definitions (SKILL.md per skill)
     implement-hybrid/
-    implement-orchestrated/
     plan-orchestrated/
     plan-spec/
     review-orchestrated/
@@ -84,6 +100,13 @@ claude-orchestrator/
     rules.md                 # Non-negotiable implementation rules
   scripts/
     materialize-context.sh   # Copies context files to spec/.context/
+    gate-implementer.sh      # PreToolUse gate for implementer spawns
+    gate-verifier.sh         # PreToolUse gate for wave-verifier spawns
+    complete-implementer.sh  # Implementer's final bash call (normal finish)
+    stop-for-clarification.sh # Implementer's final bash call (clarification exit)
+    mark-verified.sh         # Wave-verifier's final bash call (verdict map)
+    mark-dead-implementer.sh # Coordinator's dead-subagent fallback (implementer)
+    mark-dead-verifier.sh    # Coordinator's dead-subagent fallback (verifier)
   CLAUDE.md                  # Plugin-level rules and principles
 ```
 
@@ -98,10 +121,10 @@ your-project/
     phase-{n}-{name}.md      # Detailed spec per phase
     progress.md              # Append-only implementation progress
     test-baseline.md         # Pre-existing test state
-    reviews/                 # Review reports (wave and phase level)
+    reviews/                 # Review reports (phase-level)
     .context/                # Materialized agent files (gitignore this)
     .locks/                  # Runtime lock files (gitignore this)
-    .hybrid-state.json       # Recovery state for implement-hybrid
+    .hybrid-state.json       # Coordinator state for implement-hybrid (gitignore this)
 ```
 
 ## Core Principles

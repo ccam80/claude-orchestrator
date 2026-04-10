@@ -3,9 +3,9 @@ set -euo pipefail
 
 # Copies agent/reference files to spec/.context/ so spawned agents can read them.
 # Usage: materialize-context.sh <mode> <plugin_root> <project_root>
-#   mode: "implement" (5 files), "hybrid" (3 files), or "review" (2 files)
+#   mode: "hybrid" (rules + lock-protocol), "review" (rules + reviewer), or "review-spec" (rules + review-spec)
 
-mode="${1:?Usage: materialize-context.sh <implement|review> <plugin_root> <project_root>}"
+mode="${1:?Usage: materialize-context.sh <hybrid|review|review-spec> <plugin_root> <project_root>}"
 plugin_root="${2:?Missing plugin_root}"
 project_root="${3:?Missing project_root}"
 
@@ -14,15 +14,8 @@ mkdir -p "$dest"
 
 cp "${plugin_root}/references/rules.md" "$dest/rules.md"
 
-if [ "$mode" = "implement" ]; then
+if [ "$mode" = "hybrid" ]; then
   cp "${plugin_root}/references/lock-protocol.md" "$dest/lock-protocol.md"
-  cp "${plugin_root}/agents/orchestrator.md"      "$dest/orchestrator.md"
-  cp "${plugin_root}/agents/implementer.md"       "$dest/implementer.md"
-  cp "${plugin_root}/agents/reviewer.md"          "$dest/reviewer.md"
-elif [ "$mode" = "hybrid" ]; then
-  cp "${plugin_root}/references/lock-protocol.md" "$dest/lock-protocol.md"
-  # No orchestrator.md (eliminated), implementer.md (loaded via agent type),
-  # or reviewer.md (reviewer is phase-completion only, run via review-orchestrated)
 elif [ "$mode" = "review" ]; then
   cp "${plugin_root}/agents/reviewer.md" "$dest/reviewer.md"
 elif [ "$mode" = "review-spec" ]; then

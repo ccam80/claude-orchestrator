@@ -1,123 +1,6 @@
 # Handoff Templates
 
-## implement-orchestrated → orchestrator
-
-```markdown
-# Wave Orchestration Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-- **Lock Directory**: {project_dir}/spec/.locks
-
-## Wave {wave_id}: {wave_name}
-- **Phase**: {phase_name}
-- **Phase spec file**: spec/phase-{n}-{name}.md
-- **Prerequisite waves**: {completed_wave_ids}
-- **Max parallel implementers**: {max_parallel, default 4}
-
-## Tasks
-| ID | Title | Complexity | Model |
-|----|-------|------------|-------|
-| {id} | {title} | S/M/L | haiku/sonnet |
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/orchestrator.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules (apply to all agents, includes Windows shell safety rules)
-- `spec/.context/lock-protocol.md` — lock protocol for parallel coordination
-- `spec/.context/implementer.md` — implementer agent instructions (for constructing implementer prompts)
-- `spec/phase-{n}-{name}.md` — full task specifications for this wave
-- `CLAUDE.md` — project-specific rules and conventions
-- `spec/progress.md` — current implementation status
-- `spec/test-baseline.md` — pre-existing test failures (pass to implementers in their prompts)
-```
-
-## orchestrator → implementer
-
-```markdown
-# Implementation Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-- **Phase spec file**: spec/phase-{n}-{name}.md
-
-## Your First Task: {task_id} — {task_title}
-
-## Available Tasks (for self-continuation)
-| ID | Title | Complexity |
-|----|-------|------------|
-{remaining tasks in wave}
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/implementer.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules (includes Windows shell safety rules — follow them)
-- `spec/.context/lock-protocol.md` — lock protocol
-- `spec/phase-{n}-{name}.md` — full task specifications (find your task by ID)
-- `CLAUDE.md` — project-specific rules and conventions
-- `spec/test-baseline.md` — pre-existing test failures (check before investigating any test failure)
-```
-
-## implement-orchestrated → reviewer
-
-```markdown
-# Wave Review Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-
-## Wave {wave_id}: {wave_name} (just completed)
-- **Phase**: {phase_name}
-- **Phase spec file**: spec/phase-{n}-{name}.md
-
-## Wave Completion Report
-{the completion report returned by the orchestrator for this wave —
-task statuses and test result counts. For file lists, read spec/progress.md directly.}
-
-## Report Path
-Write your full report to: `spec/reviews/wave-{wave_id}.md`
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/reviewer.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules to check against
-- `spec/phase-{n}-{name}.md` — task specifications for the reviewed wave
-- `CLAUDE.md` — project-specific rules and conventions
-- `spec/progress.md` — implementation status (source of truth for file lists)
-```
-
-## reviewer → implement-orchestrated (return via Task result)
-
-```markdown
-# Review Summary: Wave {wave_id}
-
-## Verdict: clean | has-violations
-
-## Tally
-| Category | Count |
-|----------|-------|
-| Violations — critical | {n} |
-| Violations — major | {n} |
-| Violations — minor | {n} |
-| Gaps | {n} |
-| Weak tests | {n} |
-| Legacy references | {n} |
-
-## Critical Findings
-{Full details of critical-severity violations ONLY. Use the per-finding format below. If none, write "None."}
-
-### {V1}: {Short description}
-- **File**: `{path}`:{line}
-- **Rule**: {which rule is violated}
-- **Evidence**: `{the offending code or comment, quoted}`
-- **Severity**: critical
-
-## Full Report
-`spec/reviews/wave-{wave_id}.md`
-```
+These templates are used by the review pipeline. Implementation prompts (coordinator → implementer, coordinator → wave-verifier) are defined inline in `skills/implement-hybrid/SKILL.md`.
 
 ## review-orchestrated → reviewer
 
@@ -142,104 +25,6 @@ Read these files before doing anything else:
 - `spec/phase-{n}-{name}.md` — task specifications for this phase
 - `CLAUDE.md` — project-specific rules and conventions
 - `spec/progress.md` — implementation status (source of truth for file lists)
-```
-
-## reviewer → review-orchestrated (return via Task result)
-
-```markdown
-# Review Summary: Phase {n} — {phase_name}
-
-## Verdict: clean | has-violations
-
-## Tally
-| Category | Count |
-|----------|-------|
-| Violations — critical | {n} |
-| Violations — major | {n} |
-| Violations — minor | {n} |
-| Gaps | {n} |
-| Weak tests | {n} |
-| Legacy references | {n} |
-
-## Critical Findings
-{Full details of critical-severity violations ONLY. If none, write "None."}
-
-### {V1}: {Short description}
-- **File**: `{path}`:{line}
-- **Rule**: {which rule is violated}
-- **Evidence**: `{the offending code or comment, quoted}`
-- **Severity**: critical
-
-## Full Report
-`spec/reviews/phase-{n}.md`
-```
-
-## review-spec → review-spec agent
-
-```markdown
-# Spec Review Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-
-## Review Scope: Phase {n} — {phase_name}
-- **Phase spec file**: spec/phase-{n}-{name}.md
-- **Plan file**: spec/plan.md
-
-## Report Path
-Write your full report to: `spec/reviews/spec-phase-{n}.md`
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/review-spec.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules that specs must support
-- `spec/plan.md` — full plan (for plan coverage checks)
-- `spec/phase-{n}-{name}.md` — the phase spec to review
-- `CLAUDE.md` — project-specific rules and conventions
-```
-
-## review-spec agent → review-spec (return via Task result)
-
-```markdown
-# Spec Review Summary: Phase {n} — {name}
-
-## Verdict: ready | needs-revision
-
-## Tally
-| Dimension | Issues |
-|-----------|--------|
-| Plan coverage gaps | {n} |
-| Consistency issues | {n} |
-| Completeness gaps | {n} |
-| Concreteness issues | {n} |
-| Implementability concerns | {n} |
-
-## Critical Issues
-{Issues that would block implementation. If none, write "None."}
-
-## Full Report
-`spec/reviews/spec-phase-{n}.md`
-```
-
-## implementer → orchestrator (return via Task result)
-
-```markdown
-# Completion Report
-
-## Tasks Completed
-| ID | Status | Tests |
-|----|--------|-------|
-| {id} | complete/partial | {pass}/{total} |
-
-## Details per Task
-### Task {id}
-- Files created: {list}
-- Files modified: {list}
-- Tests written: {list}
-- If partial: {what remains — detailed enough for a fresh agent}
-
-## Locks Released: all
 ```
 
 ## reviewer: full report file format
@@ -284,44 +69,32 @@ This is the format the reviewer writes to its `report_path` file. It contains ev
 - **Reference**: `{the stale reference, quoted}`
 ```
 
-## implement-orchestrated: phase review combination
-
-After all waves in a phase complete, combine wave review files into a single phase report.
-
-### Input
-All wave review files for the phase: `spec/reviews/wave-*.md` matching the phase's wave IDs.
-
-### Output file
-`spec/reviews/phase-{n}-combined.md`
-
-### Output format
+## reviewer → review-orchestrated (return via Task result)
 
 ```markdown
-# Combined Review: Phase {n} — {phase_name}
+# Review Summary: Phase {n} — {phase_name}
 
-## Summary
-- **Waves reviewed**: {list of wave IDs}
-- **Total violations**: {n} (critical: {n}, major: {n}, minor: {n})
-- **Total gaps**: {n}
-- **Total weak tests**: {n}
-- **Total legacy references**: {n}
-- **Verdict**: clean | has-violations
+## Verdict: clean | has-violations
 
-## Violations
-{All violations from all wave reports, prefixed with wave ID}
+## Tally
+| Category | Count |
+|----------|-------|
+| Violations — critical | {n} |
+| Violations — major | {n} |
+| Violations — minor | {n} |
+| Gaps | {n} |
+| Weak tests | {n} |
+| Legacy references | {n} |
 
-### [Wave {wave_id}] {V1}: {Short description}
+## Critical Findings
+{Full details of critical-severity violations ONLY. If none, write "None."}
+
+### {V1}: {Short description}
 - **File**: `{path}`:{line}
 - **Rule**: {which rule is violated}
 - **Evidence**: `{the offending code or comment, quoted}`
-- **Severity**: critical | major | minor
+- **Severity**: critical
 
-## Gaps
-{All gaps from all wave reports, prefixed with wave ID}
-
-## Weak Tests
-{All weak tests from all wave reports, prefixed with wave ID}
-
-## Legacy References
-{All legacy references from all wave reports, prefixed with wave ID}
+## Full Report
+`spec/reviews/phase-{n}.md`
 ```

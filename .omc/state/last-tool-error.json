@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"ls agents/ .claude/ 2>&1; ls .claude/agents/ 2>&1\",\"description\":\"Check agents directory structure\"}",
-  "error": "Exit code 2\n.claude/:\nsettings.local.json\nstate\n\nagents/:\nimplementer.md\norchestrator.md\nreview-spec.md\nreviewer.md\nwave-verifier.md\nls: cannot access '.claude/agents/': No such file or directory",
-  "timestamp": "2026-04-09T23:31:05.232Z",
-  "retry_count": 1
-}
