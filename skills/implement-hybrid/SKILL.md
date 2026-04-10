@@ -20,11 +20,9 @@ You are the implementation coordinator. You read specs, plan all batches upfront
 ## Architecture
 
 ```
-implement-orchestrated (3 levels):        implement-hybrid (2 levels):
-  coordinator                               coordinator (you)
-    └─ orchestrator  ← ELIMINATED             └─ implementers (direct)
-         └─ implementers                      └─ wave-verifier
-    └─ reviewer
+coordinator (you)
+  └─ implementers (direct)
+  └─ wave-verifier
 ```
 
 ## Verification Gate
@@ -40,8 +38,6 @@ Two PreToolUse hooks gate spawns at the Claude Code runtime level; five in-band 
 | `mark-verified.sh` | **wave-verifier agent itself** | As the verifier's final bash call, with a JSON verdict map as arg | Updates `group_status` per task_group, increments `verifications_passed` / `verifications_failed`; rejects any entry for a task_group that is already `passed` |
 | `mark-dead-implementer.sh` | **you (the coordinator)** | When you have positive evidence an implementer subagent died without running `complete-implementer.sh` | Increments `dead_implementers` on the current batch — opens a retry slot |
 | `mark-dead-verifier.sh` | **you (the coordinator)** | When you have positive evidence a wave-verifier died without running `mark-verified.sh` | Increments `dead_verifiers` for observability; no gate impact — just re-spawn the verifier afterwards |
-
-**Why in-band recording?** Claude Code's `SubagentStop` hooks (whether registered on the skill or on the agent's own frontmatter as `Stop`) are not reliably invoked for background subagents — this is a known issue. `PostToolUse:Agent` fires when the `Agent` tool *returns*, which for `run_in_background: true` is at spawn time, long before the subagent finishes. The only reliable mechanism is to have the subagent invoke the recording script itself as its last action before returning. The implementer and wave-verifier agents' workflows make this mandatory.
 
 **You do not write counter fields in the state file after setup.** Normal completion, clarification, and verdict updates are all written by scripts the subagents invoke themselves. The only time you, the coordinator, touch counters is by invoking `mark-dead-implementer.sh` or `mark-dead-verifier.sh` — never by editing the state file directly.
 

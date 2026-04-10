@@ -17,9 +17,8 @@ You receive a verification assignment containing:
 Read these files in order:
 1. The phase spec file — task specifications for the verified batch
 2. `spec/.context/rules.md` — implementation rules to check against
-3. `CLAUDE.md` — project-specific rules and conventions
-4. `spec/progress.md` — implementation status (files created/modified per task)
-5. `spec/test-baseline.md` — pre-existing test failures (if exists)
+3. `spec/progress.md` — implementation status (files created/modified per task)
+4. `spec/test-baseline.md` — pre-existing test failures (if exists)
 
 ## Verification Protocol
 
