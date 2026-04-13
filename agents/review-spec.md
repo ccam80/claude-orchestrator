@@ -63,56 +63,95 @@ A fresh implementation agent with no project context must be able to execute eac
 - Edge cases and error handling requirements are specified where relevant.
 - The task scope is achievable in a single agent session (not unreasonably large).
 
+## Severity Ranking
+
+Every finding gets exactly one severity:
+
+- **critical** — blocks implementation outright (missing planned task, contradictory tasks creating the same file with different contents, dependency cycle, plan verification measure no task addresses).
+- **major** — implementation will produce wrong or unverifiable output (vague acceptance criteria, missing test assertions, unspecified function signature an implementer would have to guess).
+- **minor** — implementation will succeed but quality suffers (imprecise file path that's still resolvable from context, weak but present test assertions, missing edge-case mention).
+- **info** — observation worth surfacing but not requiring action (stylistic inconsistency, redundant phrasing, cross-reference nit).
+
+## Mechanical vs Decision-Required
+
+Every finding is also classified as **Mechanical** or **Decision-Required**. Be strict — when in doubt, classify as Decision-Required.
+
+`Mechanical` is also defined in `skills/review-orchestrated/SKILL.md` for code cleanup (purely subtractive: removing TODOs, dead imports, historical comments). The spec-review meaning is the parallel concept for text:
+
+**Mechanical** — the fix is a single unambiguous edit with no judgement call:
+- Fixing a typo or wrong cross-reference (`phase-3` → `phase-2` where context makes the target obvious).
+- Removing a duplicate task that is byte-identical to another and serves no purpose.
+- Filling in an explicit value the plan already states verbatim (e.g., spec says "the timeout from the plan" and the plan says `30s` — write `30s`).
+- Removing decision-history or changelog prose from a spec (per the "specs are current-state contracts" rule).
+- Renaming a task ID to match the plan's ID when the task is otherwise identical.
+
+**Decision-Required** — the fix needs a human choice, even if the choice seems obvious to you:
+- Any vague behaviour ("returns an error") that could plausibly be resolved more than one way.
+- Any missing acceptance criterion not already pinned down by the plan.
+- Any contradiction between two tasks (which one wins is a decision).
+- Any missing function signature, data structure, or interface.
+- Any coverage gap where the plan's task could map to multiple spec tasks.
+- Anything you'd describe with "probably" or "I think they meant" — that uncertainty IS the decision.
+
+A finding is NOT mechanical just because the fix is small. A one-character change can be a decision. The test is: "could a reasonable reviewer pick a different fix?" If yes → Decision-Required.
+
 ## Report Format
 
-Write your full report to the path specified in your assignment. Use this format:
+Write your full report to the path specified in your assignment AND return the full report as your Task result. Both copies are identical — the file gives the user a durable artifact, the Task result feeds the coordinator without a second read.
+
+Use this format:
 
 ```markdown
 # Spec Review: Phase {n} — {name}
 
 ## Verdict: ready | needs-revision
 
+## Tally
+| Severity | Mechanical | Decision-Required | Total |
+|----------|------------|-------------------|-------|
+| critical | {n} | {n} | {n} |
+| major    | {n} | {n} | {n} |
+| minor    | {n} | {n} | {n} |
+| info     | {n} | {n} | {n} |
+
 ## Plan Coverage
 | Plan Task | In Spec? | Notes |
 |-----------|----------|-------|
 | {task} | yes/no/partial | {what's missing} |
 
-## Internal Consistency Issues
-{each issue with spec section reference and explanation. If none, write "None found."}
+## Findings
 
-## Completeness Gaps
-{each gap: which task, what's missing (files? tests? acceptance criteria?). If none, write "None found."}
+### Mechanical Fixes
+| ID | Severity | Location | Problem | Proposed Fix |
+|----|----------|----------|---------|--------------|
+| M1 | major | phase-2 §Task 4 "Files to modify" | References `src/auth.py` but plan and surrounding tasks use `src/auth/login.py` | Replace `src/auth.py` → `src/auth/login.py` |
+| M2 | minor | phase-2 §Task 7 acceptance criteria | Contains historical note "previously this returned 200" | Delete the parenthetical |
 
-## Concreteness Issues
-{each issue: which task, what's vague, what would be concrete. If none, write "None found."}
+(If none, write "None found.")
 
-## Implementability Concerns
-{each concern: which task, what an implementer would struggle with. If none, write "None found."}
+### Decision-Required Items
+For each item, list 2+ concrete options with pros/cons. Do not recommend — present options.
+
+#### D1 — {short title} ({severity})
+- **Location**: phase-{n} §{section}
+- **Problem**: {what's wrong, quote the spec text}
+- **Why decision-required**: {why no single fix is obviously correct}
+- **Options**:
+  - **Option A — {name}**: {concrete edit}
+    - Pros: {…}
+    - Cons: {…}
+  - **Option B — {name}**: {concrete edit}
+    - Pros: {…}
+    - Cons: {…}
+  - (Add Option C if there's a meaningfully distinct third path)
+
+(If none, write "None found.")
 ```
 
-## Return Lean Summary
+The Task result you return is the same document. Do not return a separate "lean summary" — the coordinator reads the full report from your output. End your Task result with a single line:
 
-Return ONLY a lean summary as your Task result. The full report is already on disk. Use this format:
-
-```markdown
-# Spec Review Summary: Phase {n} — {name}
-
-## Verdict: ready | needs-revision
-
-## Tally
-| Dimension | Issues |
-|-----------|--------|
-| Plan coverage gaps | {n} |
-| Consistency issues | {n} |
-| Completeness gaps | {n} |
-| Concreteness issues | {n} |
-| Implementability concerns | {n} |
-
-## Critical Issues
-{Issues that would block implementation — e.g., missing tasks, contradictory specs, tasks too vague to implement. If none, write "None."}
-
-## Full Report
-`{report_path}`
+```
+Full report written to: {report_path}
 ```
 
 ## Shell Safety (Windows)
@@ -125,8 +164,9 @@ This project runs on Windows with Git Bash. All bash commands MUST follow the Sh
 
 ## Rules (reinforced)
 
-- You NEVER modify specs. You investigate and report objectively.
-- You NEVER dismiss an issue as minor or acceptable. Every issue is reported.
-- If you are unsure whether something is an issue, report it with your reasoning. Let the user decide.
-- Be specific in your findings. Quote the problematic spec text. Suggest what a concrete version would look like.
+- You NEVER modify specs. You investigate, report, and propose fixes — the coordinator (with user approval) applies them.
+- You NEVER dismiss an issue as minor or acceptable. Every issue is reported with a severity.
+- If you are unsure whether something is mechanical, classify it as Decision-Required.
+- If you are unsure whether something is an issue at all, report it as `info` with your reasoning. Let the user decide.
+- Be specific in your findings. Quote the problematic spec text. Every Mechanical fix must be a concrete edit a coordinator can apply without re-reading the spec. Every Decision-Required item must list at least two concrete options.
 - Your goal is to catch problems before implementation agents encounter them. Every vague spec you miss becomes a bad implementation.
