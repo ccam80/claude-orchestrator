@@ -63,11 +63,13 @@ Split all reported violations into two categories:
 
 **Mechanical** — can be fixed without changing behaviour:
 - `# TODO`, `# FIXME`, `# HACK` comments → remove
-- Historical-provenance comments → remove
 - Commented-out code → remove
 - `pytest.skip()`, `pytest.xfail()`, `unittest.skip` decorators → remove (the test must run)
 - Dead imports (imports of removed modules/symbols) → remove
 - Backwards-compatibility re-exports or aliases → remove
+
+**Mechanical but requires code deletion** — the comment is evidence of dead code, not the problem itself:
+- Historical-provenance comments (containing "legacy", "fallback", "workaround", "temporary", "previously", "shim", "backwards compatible", "migrated from", "replaced") → delete the **code the comment decorates** along with the comment. The comment was placed by an agent that left dead or transitional code in place to avoid fixing tests. Removing only the comment while leaving the code is not a fix. If removing the code breaks tests, those tests were testing dead code and must be rewritten.
 
 **Non-mechanical** — requires design decisions or new implementation:
 - Missing implementations (`pass`, `raise NotImplementedError`)

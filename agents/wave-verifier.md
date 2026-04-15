@@ -58,11 +58,11 @@ Any task whose spec explicitly requires the user (e.g. "the user must configureâ
 - A `complete` or `partial` status in `spec/progress.md` for a task that requires user action, without a corresponding coordinator confirmation that the user performed it
 If a task requires user action and that action was not performed through the coordinator, the task_group FAILS regardless of all other checks passing.
 
-**Legacy and fallback patterns:**
+**Legacy and fallback patterns (these are dead-code problems, not comment problems):**
 - Backwards-compatibility shims, re-exports, deprecated wrappers
 - Feature flags or environment-variable toggles for old/new behaviour
 - Fallback code paths to removed functionality
-- Comments describing what code replaced or used to do (historical-provenance)
+- Comments containing "legacy", "fallback", "workaround", "temporary", "previously", "shim", "backwards compatible", "migrated from", or "replaced" â€” when found, the **code the comment decorates** is the violation. An agent put that comment there to avoid deleting dead code and fixing the tests that depended on it. FAIL the code block, not just the comment. If only the comment was removed and the dead code remains, that is also a FAIL.
 
 **Test quality (each is a FAIL condition):**
 - `pytest.skip()`, `pytest.xfail()`, `unittest.skip`, or soft assertions

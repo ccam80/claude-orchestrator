@@ -213,7 +213,7 @@ These are absolute. Do not violate them under any circumstances:
 - No pytest.skip(), pytest.xfail(), unittest.skip, or soft assertions.
 - No TODO, FIXME, HACK comments. No pass or raise NotImplementedError.
 - No commented-out code. No backwards compatibility shims.
-- No historical-provenance comments. Never write comments describing what code replaced, what it used to do, or where it came from. If you feel the need to justify a change in a comment, that is a signal you have not implemented the new functionality cleanly.
+- Never write comments containing "legacy", "fallback", "workaround", "temporary", "previously", "backwards compatible", "shim", or "replaced." If you feel the need to justify a change in a comment, that is a signal you left dead code in place to avoid deleting it and fixing tests. Delete the old code, write the new implementation, and fix the tests.
 - Never use `git stash`, `git checkout`, `git reset`, or `git clean`. Pre-existing test state is in `spec/test-baseline.md`.
 - If you cannot finish a task, write detailed progress to spec/progress.md describing exactly what's done and what's next. Do not summarize.
 - If a rule conflicts with the task spec, note the conflict in your completion report. Do not resolve it yourself.
