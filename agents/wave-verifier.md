@@ -50,6 +50,14 @@ Scan all created/modified files for violations. These are **automatic FAIL condi
 - `pass` or `raise NotImplementedError` in production code
 - Any comment containing "for now", "temporary", "later", "out of scope", "future work"
 
+**User-required task deferral (automatic FAIL — no exceptions):**
+Any task whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") that was completed without evidence of actual user action. Specific patterns that constitute deferral of a user-required task:
+- Placeholder values standing in for user-provided input
+- Comments indicating the user should act later ("user needs to…", "to be configured by user", "replace with your…")
+- Stub implementations that assume the user will complete the action post-deployment
+- A `complete` or `partial` status in `spec/progress.md` for a task that requires user action, without a corresponding coordinator confirmation that the user performed it
+If a task requires user action and that action was not performed through the coordinator, the task_group FAILS regardless of all other checks passing.
+
 **Legacy and fallback patterns:**
 - Backwards-compatibility shims, re-exports, deprecated wrappers
 - Feature flags or environment-variable toggles for old/new behaviour

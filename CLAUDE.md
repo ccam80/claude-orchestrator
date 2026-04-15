@@ -48,6 +48,12 @@ These rules apply to ALL sessions — planning, speccing, and implementation.
 - **No historical-provenance comments.** Comments that describe what code replaced, what it used to do, why it changed, or where it came from (e.g. "this replaces the old X", "formerly did Y", "migrated from Z") are banned. Their presence indicates the agent failed to implement new functionality cleanly and is justifying a half-measure.
 - Comments exist ONLY to explain complicated code to future developers.
 
+### User-Required Tasks
+- Tasks whose spec explicitly requires the user are **hard stop gates**. No task can pass verification with any form of deferral on a user-required action without explicit user permission through the orchestrator.
+- Implementers must take the Clarification Exit path for user-required tasks — they cannot mark them complete.
+- The coordinator must surface user-required tasks immediately and hold the batch open until the user confirms completion.
+- Verifiers and reviewers must FAIL any task_group where a user-required action was deferred, stubbed, or placeholdered.
+
 ### Agent Discipline
 - Never soften, reinterpret, or "pragmatically adjust" these rules.
 - If a rule seems to conflict with the task, flag it to the user or orchestrator. Do not resolve the conflict yourself.

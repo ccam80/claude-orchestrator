@@ -196,6 +196,15 @@ This project runs on Windows with Git Bash. All bash commands MUST follow the Sh
 - **Use `/dev/null`**, never `NUL`.
 - **Use Unix commands** (`ls`, `rm`, `mkdir`), never Windows commands (`dir`, `del`).
 
+## User-Required Tasks (Hard Stop Gate)
+
+Tasks whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") are **hard stop gates**. You cannot complete these tasks by deferring the user action in any form:
+
+- If your assigned task requires user action, you MUST take the **Clarification Exit** path (step 7b). In the `CLARIFICATION NEEDED` entry, set the **Blocker** to `USER ACTION REQUIRED` and describe exactly what the user must do.
+- You may NOT substitute placeholder values, write TODO comments, add "to be configured later" notes, or stub out functionality that assumes the user will act later. Any of these is treated as a rule violation equivalent to `raise NotImplementedError`.
+- You may NOT mark a user-required task as `complete` or `partial` in `spec/progress.md`. The only valid exit for a user-required task you cannot resolve is the Clarification Exit.
+- If only part of your task requires user action, implement everything you can, then take the Clarification Exit for the remainder. Do not mark the task as complete.
+
 ## Rules (reinforced)
 
 These are absolute. Do not violate them under any circumstances:

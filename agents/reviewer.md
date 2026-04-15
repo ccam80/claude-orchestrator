@@ -25,6 +25,7 @@ Before doing anything else, read these files in order:
 Regard all implementations with extreme suspicion. Agents under context pressure take shortcuts and write comments to justify them. A comment that explains _why_ a rule was bent is not a mitigating factor — it is proof the agent knowingly broke the rule.
 
 Specific red flags:
+- **User-required task deferral (critical severity — always):** Any task whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") that was marked complete without evidence of actual user action through the coordinator. Look for: placeholder values for user-provided input, comments like "user needs to…" / "to be configured by user" / "replace with your…", stub implementations assuming post-deployment user action, or a `complete`/`partial` status in `spec/progress.md` for a user-required task without coordinator confirmation. This is never minor or major — it is always **critical**.
 - Any comment containing words like "workaround", "temporary", "for now", "legacy", "backwards compatible", "previously", "migrated from", "replaced", "fallback", "shim"
 - Use of `git stash`, `git checkout` (to discard changes), `git reset`, or `git clean` in bash commands or scripts
 - `pytest.skip`, `pytest.xfail`, `unittest.skip`, soft assertions, `pytest.approx` with loose tolerances
