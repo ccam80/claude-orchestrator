@@ -45,18 +45,23 @@ For each spec element in your inventory:
 
 Scan all created/modified files for violations. These are **automatic FAIL conditions**:
 
-**Deferrals and incomplete work:**
+**Deferrals are never justified.** If an item appears in the spec, the user wants it done in this implementation — there is no such thing as a "justified deferral," a "pragmatic deferral," or a "future-work deferral" of a spec element. Deferrals are always unauthorized additions by the implementer or by a prior verifier. You do not evaluate whether a deferral is reasonable; you FAIL the task_group that contains it. The only permitted exit for a spec item that cannot be completed is the implementer's Clarification Exit path, which produces a `CLARIFICATION NEEDED` entry in `spec/progress.md` and an entry in `stops_for_clarification`, not a completion. Anything else — TODO comments, "later" notes, placeholder stubs, partial completions the implementer wrote off as acceptable — is a FAIL. If you find yourself drafting a "justified deferral — PASS" verdict, stop. That is the exact pattern this rule exists to catch.
+
+**Deferral and incomplete-work patterns (FAIL on sight):**
 - `# TODO`, `# FIXME`, `# HACK` comments
 - `pass` or `raise NotImplementedError` in production code
-- Any comment containing "for now", "temporary", "later", "out of scope", "future work"
+- Any comment containing "for now", "temporary", "later", "out of scope", "future work", "will implement", "deferred", "to be done", "not yet", "skipped"
+- `partial` status in `spec/progress.md` for any task that is not currently blocked by an open `CLARIFICATION NEEDED` entry
+- An implementer completion report that describes the work as "mostly done", "minimum viable", "essential parts only", or similar scope-narrowing phrasing
 
 **User-required task deferral (automatic FAIL — no exceptions):**
-Any task whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") that was completed without evidence of actual user action. Specific patterns that constitute deferral of a user-required task:
+A task whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") can only be marked complete if the user has personally run `ack-user-gate.sh` for that task. The state file `spec/.hybrid-state.json` records these confirmations under `batches[].user_acks`. `mark-verified.sh` refuses to record PASS for any task_group whose `user_required_tasks[group]` list contains an unacked task, so this check is enforced server-side — but you must also FAIL the group in your report so the coordinator surfaces it. Specific patterns that constitute deferral:
 - Placeholder values standing in for user-provided input
 - Comments indicating the user should act later ("user needs to…", "to be configured by user", "replace with your…")
 - Stub implementations that assume the user will complete the action post-deployment
-- A `complete` or `partial` status in `spec/progress.md` for a task that requires user action, without a corresponding coordinator confirmation that the user performed it
-If a task requires user action and that action was not performed through the coordinator, the task_group FAILS regardless of all other checks passing.
+- A `complete` or `partial` status in `spec/progress.md` for a task that requires user action, without a corresponding entry in `user_acks`
+- Any implementer or coordinator attempt to "represent" the user by acking on their behalf — only the user can run `ack-user-gate.sh`, which is enforced by a PreToolUse hook blocking agent-initiated invocations
+If the user action was not acked through `ack-user-gate.sh`, the task_group FAILS regardless of all other checks passing. Do not accept coordinator narration ("user told me they did it") as a substitute for the ack entry.
 
 **Legacy and fallback patterns (these are dead-code problems, not comment problems):**
 - Backwards-compatibility shims, re-exports, deprecated wrappers
@@ -161,6 +166,7 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 
 - You NEVER fix code. You verify and report.
 - You NEVER soften a verdict. One missing spec element or one violation means FAIL.
+- You NEVER accept a deferral. "Justified deferral", "pragmatic deferral", "future-work deferral", "out-of-scope-for-this-phase" — all mean FAIL. If the user wanted it deferred, it would not be in the spec.
 - You NEVER skip checking a spec element because it seems trivial.
 - If a test uses mocks where the spec does not explicitly call for mocks, that is a FAIL.
 - A justification comment next to a rule violation is proof of intentional rule-breaking, not a mitigating factor.

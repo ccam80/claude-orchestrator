@@ -91,7 +91,9 @@ result=$(node -e "(() => {
 
   // Validate every verdict entry before applying any.
   const batchGroups = new Set(batch.task_groups || []);
-  for (const [key] of entries) {
+  const userRequired = batch.user_required_tasks || {};
+  const userAcks = batch.user_acks || {};
+  for (const [key, val] of entries) {
     if (!batchGroups.has(key)) {
       out({ok: false, error: 'Task_group ' + JSON.stringify(key) + ' is not in batch ' +
         JSON.stringify(batch.id) + '. Known groups: ' + JSON.stringify([...batchGroups])});
@@ -102,6 +104,21 @@ result=$(node -e "(() => {
       out({ok: false, error: 'Task_group ' + JSON.stringify(key) + ' is already passed on batch ' +
         JSON.stringify(batch.id) + ' and cannot be re-verified. Only include task_groups you actually re-verified in this run.'});
       return;
+    }
+    // User-required task enforcement: a PASS cannot be recorded for a group
+    // with any unacked user-required task. Agents have a documented tendency
+    // to present deferral-first recommendations for user gates; this check
+    // makes that impossible regardless of what the verifier reports.
+    if (val === 'PASS') {
+      const required = Array.isArray(userRequired[key]) ? userRequired[key] : [];
+      const unacked = required.filter(taskId => !userAcks[taskId]);
+      if (unacked.length > 0) {
+        out({ok: false, error: 'Task_group ' + JSON.stringify(key) +
+          ' cannot PASS: the following user-required task(s) have no entry in batches[].user_acks: ' +
+          JSON.stringify(unacked) +
+          '. Only the user, running ack-user-gate.sh in their own terminal, can record these acks. Do NOT attempt to run ack-user-gate.sh yourself — it is blocked by a PreToolUse hook.'});
+        return;
+      }
     }
   }
 

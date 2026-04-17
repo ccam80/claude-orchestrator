@@ -11,6 +11,10 @@ hooks:
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-implementer.sh\""
         - type: command
           command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-verifier.sh\""
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/gate-user-ack.sh\""
 ---
 
 # Implement Hybrid
@@ -33,11 +37,15 @@ Two PreToolUse hooks gate spawns at the Claude Code runtime level; five in-band 
 |--------|-----------|------|--------|
 | `gate-implementer.sh` | Claude Code (PreToolUse on Agent, skill frontmatter) | Before each Agent tool call | Filters on `subagent_type=implementer`; checks spawn conditions, increments `spawned` on allow; exit 2 with stderr reason on block |
 | `gate-verifier.sh` | Claude Code (PreToolUse on Agent, skill frontmatter) | Before each Agent tool call | Filters on `subagent_type=wave-verifier`; blocks if nothing to verify or the batch is already fully verified |
+| `gate-user-ack.sh` | Claude Code (PreToolUse on Bash, skill frontmatter) | Before any Bash call | Blocks any Claude-initiated invocation of `ack-user-gate.sh` — that script is USER-ONLY and must be run by the user in their own terminal |
 | `complete-implementer.sh` | **implementer agent itself** | As the implementer's final bash call before returning normally | Increments `completed` on the current batch |
 | `stop-for-clarification.sh` | **implementer agent itself** | As the final bash call when the implementer is stopping because the spec is ambiguous (alternative to `complete-implementer.sh`) | Increments `stops_for_clarification` on the current batch — opens a retry slot without marking work as completed |
-| `mark-verified.sh` | **wave-verifier agent itself** | As the verifier's final bash call, with a JSON verdict map as arg | Updates `group_status` per task_group, increments `verifications_passed` / `verifications_failed`; rejects any entry for a task_group that is already `passed` |
+| `mark-verified.sh` | **wave-verifier agent itself** | As the verifier's final bash call, with a JSON verdict map as arg | Updates `group_status` per task_group, increments `verifications_passed` / `verifications_failed`; rejects any entry for a task_group that is already `passed`, and rejects PASS for any group with unacked `user_required_tasks` |
+| `ack-user-gate.sh` | **the user, in their own terminal** (NOT Claude) | When the user has performed a real-world user-required action | Writes `user_acks[task_id]` on the batch whose `user_required_tasks` lists the task. Agent-initiated calls are blocked by `gate-user-ack.sh` |
 | `mark-dead-implementer.sh` | **you (the coordinator)** | When you have positive evidence an implementer subagent died without running `complete-implementer.sh` | Increments `dead_implementers` on the current batch — opens a retry slot |
 | `mark-dead-verifier.sh` | **you (the coordinator)** | When you have positive evidence a wave-verifier died without running `mark-verified.sh` | Increments `dead_verifiers` for observability; no gate impact — just re-spawn the verifier afterwards |
+| `i-fixed-it.sh` | **you (the coordinator)** — escape hatch | When you have made a trivial in-place fix and want to re-run the verifier without spawning another implementer. Prefer spawning a fix-implementer in almost all cases. | "Phantom implementer" record: increments BOTH `spawned` and `completed` by 1, so the verifier gate unlocks and a retry slot is consumed. Requires a `failed` group to exist on the active batch. |
+| `reopen-implementer-slot.sh` | **you (the coordinator)** — escape hatch | When an implementer returned "complete" but you have concluded the work wasn't actually done, and you want to skip running a verifier just to hear it say FAIL | Erases the phantom completion: decrements BOTH `completed` and `spawned` by 1. Requires a group_id and a reason argument. |
 
 **You do not write counter fields in the state file after setup.** Normal completion, clarification, and verdict updates are all written by scripts the subagents invoke themselves. The only time you, the coordinator, touch counters is by invoking `mark-dead-implementer.sh` or `mark-dead-verifier.sh` — never by editing the state file directly.
 
@@ -53,6 +61,35 @@ An in-band recording script is only as reliable as the subagent running it. If a
 4. Log the recovery in `spec/progress.md` under a **Recovery events** heading with timestamp, batch id, which script you invoked, and why (e.g. "TaskOutput returned completed for agent X but counters unchanged after 30s").
 
 Never use this fallback speculatively. A live subagent whose counter simply hasn't updated yet is not dead — wait for `TaskOutput(block=true)` to return before considering intervention.
+
+### Coordinator Escape Hatches (use sparingly)
+
+Two scripts exist for state surgery the coordinator does directly, without spawning a subagent. Both are explicitly low-advertised: the preferred path for a failed verification is still to spawn a fix-implementer, and the preferred path for catching a bogus completion is still to let the verifier catch it. Reach for these only when the alternative is wasting a subagent cycle for no gain.
+
+**`i-fixed-it.sh`** — you have made a trivial in-place fix (typo, import reorder, lint nit) to code produced by a prior implementer, and you want the wave-verifier to re-audit the batch without spawning another implementer. The script takes a one-line description and records a "phantom implementer" by incrementing BOTH `spawned` and `completed` on the active batch. Verifier gate unlocks; spawn-cap stays tight (a retry slot is consumed, matching what a real implementer would have cost).
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/i-fixed-it.sh" "Removed stray trailing comma in src/foo.ts L12"
+```
+
+Preconditions the script enforces:
+- an active batch exists (not fully passed)
+- at least one group in the active batch has `group_status == "failed"` — you can only use this to recover from a FAIL, not to skip first-pass implementation
+- an implementer spawn slot is currently open (`spawned < cap`)
+
+**`reopen-implementer-slot.sh`** — an implementer returned "complete" (incrementing `completed` via its own in-band script) but you have positive evidence the work wasn't actually done, and you want to skip spawning a verifier just to hear it say FAIL. The script takes the group_id and a reason, and decrements BOTH `completed` and `spawned`. Net effect: the phantom completion is erased. Verifier gate closes; implementer gate opens.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/reopen-implementer-slot.sh" "1.2" "Returned 'complete' without creating any of the required files"
+```
+
+Preconditions the script enforces:
+- an active batch exists
+- the group_id is in the active batch and is not already `passed`
+- `completed > verifications_passed + verifications_failed` (there is an unreviewed completion to erase); if the bogus completion has already been verified, use the normal fix-implementer path against the `failed` retry slot instead
+- `spawned > 0`
+
+Both scripts append an entry to `batches[].recovery_log` with the timestamp, script name, and your description / reason. This log is purely for audit — no gate reads it — but it is the only durable record of coordinator interventions, so be precise in the string you pass.
 
 ### Clarification Stops
 
@@ -80,21 +117,29 @@ The state file `spec/.hybrid-state.json` combines counters with per-task_group s
         "1.1": "pending",
         "1.2": "pending",
         "1.3": "pending"
-      }
+      },
+      "user_required_tasks": {
+        "1.1": [],
+        "1.2": ["T1.2"],
+        "1.3": []
+      },
+      "user_acks": {}
     }
   ],
   "last_updated": "{ISO 8601}"
 }
 ```
 
-**Fields you write (once, at setup):** `id`, `task_groups`, `tasks`, all seven counters initialized to 0, and `group_status` with every task_group set to `"pending"`.
+**Fields you write (once, at setup):** `id`, `task_groups`, `tasks`, all seven counters initialized to 0, `group_status` with every task_group set to `"pending"`, `user_required_tasks` mapping each task_group to the list of task_ids in that group whose spec explicitly requires a user action (empty list if none), and `user_acks` initialized to `{}`.
 
 **Fields written after setup (do not edit them yourself):**
-- `spawned` — written by `gate-implementer.sh` (PreToolUse hook, automatic).
-- `completed` — written by `complete-implementer.sh`, invoked by the implementer agent as its final bash call on a normal finish.
+- `spawned` — written by `gate-implementer.sh` (PreToolUse hook, automatic), and adjusted by `i-fixed-it.sh` / `reopen-implementer-slot.sh` under the escape-hatch paths.
+- `completed` — written by `complete-implementer.sh`, invoked by the implementer agent as its final bash call on a normal finish, and adjusted by `i-fixed-it.sh` / `reopen-implementer-slot.sh`.
 - `stops_for_clarification` — written by `stop-for-clarification.sh`, invoked by the implementer agent as its final bash call when it takes the clarification exit path instead of finishing the task.
 - `verifications_passed` / `verifications_failed` / `group_status` — written by `mark-verified.sh`, invoked by the wave-verifier agent as its final bash call with a JSON verdict map.
 - `dead_implementers` / `dead_verifiers` — written by `mark-dead-implementer.sh` / `mark-dead-verifier.sh`, which you (the coordinator) invoke under the dead-subagent fallback.
+- `user_acks` — written ONLY by the user running `ack-user-gate.sh` in their own terminal. Never write this field from any Claude-driven path; the PreToolUse `gate-user-ack.sh` hook blocks agent-initiated invocations.
+- `recovery_log` — appended by `i-fixed-it.sh` / `reopen-implementer-slot.sh` as an audit trail of coordinator interventions.
 - `last_updated` — written by whichever of the above runs most recently.
 
 Each **task_group** is one implementer's assignment — the tasks that one agent will work on. The `task_groups` array has one entry per implementer you plan to spawn. The `tasks` array is parallel — `tasks[i]` lists the spec task IDs for `task_groups[i]`. `group_status[task_group_id]` tracks whether that group is currently `"pending"`, `"failed"`, or `"passed"`.
@@ -151,6 +196,8 @@ From the phase spec and `spec/plan.md`:
 - Group parallel waves into a single **batch**. Sequential waves each get their own batch.
 - For each batch, determine the task_groups: one entry per implementer you will spawn. Assign tasks to groups based on complexity and parallelism (`min(tasks, 4)` groups per batch).
 
+For each task in each task_group, re-read its spec and decide whether it **requires the user** — i.e. the spec explicitly says the user must configure, provide, verify, deploy, or otherwise take a real-world action that no agent can perform. Record those task_ids under `user_required_tasks[group]`. Groups with no user-required task get an empty list. **Do not skip this step.** `mark-verified.sh` refuses to PASS any group whose user-required tasks are unacked, and the user can only ack tasks you listed here — if you forget a user-required task, the user cannot ack it and the group will stall.
+
 Write the complete state file:
 
 ```json
@@ -170,7 +217,12 @@ Write the complete state file:
       "group_status": {
         "1.1": "pending",
         "1.2": "pending"
-      }
+      },
+      "user_required_tasks": {
+        "1.1": [],
+        "1.2": ["T1.2a"]
+      },
+      "user_acks": {}
     },
     {
       "id": "batch-2",
@@ -185,7 +237,11 @@ Write the complete state file:
       "dead_verifiers": 0,
       "group_status": {
         "2.1": "pending"
-      }
+      },
+      "user_required_tasks": {
+        "2.1": []
+      },
+      "user_acks": {}
     }
   ],
   "last_updated": "{ISO 8601}"
@@ -403,13 +459,31 @@ You are a long-running coordinator. Protect your context aggressively:
 
 ## User-Required Task Gate
 
-Tasks whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") are **hard stop gates**. They are never deferred, skipped, or worked around:
+Tasks whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") are **hard stop gates**. There is no "deferral-first" option, no "we can revisit this", no "I'll note it and move on". The user gate is enforced by three independent mechanisms working together:
 
-- When you encounter a user-required task in a batch, surface it to the user **immediately** via `AskUserQuestion` before proceeding past it. Do not spawn implementers for downstream tasks that depend on the user-required task until the user has completed it.
-- No task_group containing a user-required task can pass verification if the user action was deferred in any form — including TODO comments, placeholder values, "to be configured later" notes, or stub implementations that assume the user will act later.
-- If an implementer reports a user-required task as complete without evidence that the user actually performed the required action, treat it as incomplete. Do not advance the batch.
-- A user-required task that is blocked waiting for user input is not a failure — it is a gate. Hold the batch open and wait. Do not time it out or mark it as skipped.
-- Only the user, through you (the coordinator), can confirm that a user-required action has been performed. Implementers and verifiers cannot self-certify user actions.
+1. **Spec-time enumeration.** At setup (the "Plan All Batches" step above) you MUST populate `user_required_tasks[group]` with every task_id in that group whose spec requires the user. If you miss one, the user cannot ack it and the group will never PASS.
+2. **User-only ack script.** The only way the `user_acks` map gets populated is the user personally running `bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<evidence>"` in their own terminal, outside this Claude Code session. Every Claude-initiated bash call that mentions `ack-user-gate.sh` is blocked by `gate-user-ack.sh` (PreToolUse hook, registered in this skill's frontmatter). That includes direct Bash calls, `!`-prefixed commands, and background Tasks. You **cannot** ack on the user's behalf; attempting to do so fails with an exit 2 and a directive telling you to present the command to the user instead.
+3. **Server-side PASS rejection.** `mark-verified.sh` refuses to record PASS for any task_group whose `user_required_tasks[group]` list contains a task_id missing from `user_acks`. Even if the wave-verifier mistakenly reports PASS, the state file will not accept it, and the batch stays open.
+
+### Flow for a user-required task
+
+1. As soon as you know a batch contains a user-required task, present the ack command to the user via `AskUserQuestion`. The question body must include:
+   - The task_id and the exact real-world action the user must perform.
+   - The verbatim command to run:
+     ```
+     bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<one-line evidence of what you did>"
+     ```
+   - Explicit instructions that the user must run it in a **separate terminal** (their own shell, not a `!`-prefixed call inside this Claude Code session — that goes through the Bash tool and is blocked).
+2. Do not spawn implementers for the user-required task itself. Implementers cannot complete it; they would have to take the Clarification Exit anyway. Implementers for other tasks in the same group proceed normally, but the group cannot PASS until the ack is recorded.
+3. Wait for the user to confirm. Read `spec/.hybrid-state.json` to confirm `user_acks[<task_id>]` is now present with the expected evidence.
+4. Only then spawn the wave-verifier. `mark-verified.sh` will accept PASS for the group if and only if every user-required task has an ack entry.
+
+### What you MUST NOT do
+
+- Do not recommend deferring a user-required task. "We can wire this up later" / "for now let's stub it" / "the user can fill this in post-deployment" are all prohibited outputs. If you find yourself drafting that recommendation, stop and present the ack command instead.
+- Do not ack on the user's behalf, even if the user tells you "just confirm it for me". The hook will block the attempt; the correct response is to hand them the command and ask them to run it.
+- Do not invent placeholder acks, write `user_acks` directly via a script you wrote, or edit `spec/.hybrid-state.json` to insert one. All of these are caught by code review, by verifier scans, and by `mark-verified.sh`'s enforcement logic — and they defeat the single mechanism that guarantees the user actually did the thing.
+- Do not advance past a user-required task while it remains unacked, no matter how long it has been waiting. It is a gate, not a timeout.
 
 ## Error Handling
 
@@ -435,8 +509,11 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 - The `claude-orchestrator:implementer` agent type loads its instructions automatically.
 - Rely on `spec/progress.md` as source of truth, not on parsing agent output.
 - Ownership of state fields:
-  - `spawned` — written by the PreToolUse `gate-implementer.sh` hook.
-  - `completed` — written by `complete-implementer.sh`, invoked by the implementer on a normal finish.
+  - `spawned` — written by the PreToolUse `gate-implementer.sh` hook; adjusted by `i-fixed-it.sh` / `reopen-implementer-slot.sh` under the escape-hatch paths.
+  - `completed` — written by `complete-implementer.sh`, invoked by the implementer on a normal finish; adjusted by `i-fixed-it.sh` / `reopen-implementer-slot.sh`.
   - `stops_for_clarification` — written by `stop-for-clarification.sh`, invoked by the implementer on a clarification exit.
   - `verifications_passed` / `verifications_failed` / `group_status` — written by `mark-verified.sh`, invoked by the wave-verifier.
   - `dead_implementers` / `dead_verifiers` — written by `mark-dead-implementer.sh` / `mark-dead-verifier.sh`, which you invoke under the dead-subagent fallback described in the "Dead-Subagent Fallback" section.
+  - `user_required_tasks` — written ONCE by you at setup, enumerating the user-required task_ids per group. Never edited after setup.
+  - `user_acks` — written ONLY by the user running `ack-user-gate.sh` in their own terminal. The PreToolUse `gate-user-ack.sh` hook blocks all agent-initiated invocations.
+  - `recovery_log` — appended by `i-fixed-it.sh` / `reopen-implementer-slot.sh` for audit; human-readable only, not consumed by any gate.

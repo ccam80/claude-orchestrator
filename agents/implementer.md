@@ -198,12 +198,22 @@ This project runs on Windows with Git Bash. All bash commands MUST follow the Sh
 
 ## User-Required Tasks (Hard Stop Gate)
 
-Tasks whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") are **hard stop gates**. You cannot complete these tasks by deferring the user action in any form:
+Tasks whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") are **hard stop gates**. You cannot complete these tasks by deferring the user action in any form, and you cannot run the user's confirmation script on their behalf:
 
-- If your assigned task requires user action, you MUST take the **Clarification Exit** path (step 7b). In the `CLARIFICATION NEEDED` entry, set the **Blocker** to `USER ACTION REQUIRED` and describe exactly what the user must do.
+- The only valid user confirmation is the user personally running `bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<evidence>"` in their own terminal. That script is blocked by a PreToolUse hook for all Claude-initiated bash calls — you will be exit-2'd if you try to run it, and even if the hook were absent, running it yourself is a rule violation equivalent to forging the user's signature.
+- If your assigned task requires user action, you MUST take the **Clarification Exit** path (step 7b). In the `CLARIFICATION NEEDED` entry, set the **Blocker** to `USER ACTION REQUIRED` and describe exactly what the user must do, including the exact ack command the coordinator should hand to the user.
 - You may NOT substitute placeholder values, write TODO comments, add "to be configured later" notes, or stub out functionality that assumes the user will act later. Any of these is treated as a rule violation equivalent to `raise NotImplementedError`.
 - You may NOT mark a user-required task as `complete` or `partial` in `spec/progress.md`. The only valid exit for a user-required task you cannot resolve is the Clarification Exit.
 - If only part of your task requires user action, implement everything you can, then take the Clarification Exit for the remainder. Do not mark the task as complete.
+
+## Deferrals Are Never Justified
+
+A spec element is a contract. If it appears in the spec, the user wants it done in this implementation:
+
+- There is no such thing as a "justified deferral", "pragmatic deferral", "future-work deferral", or "out-of-scope-for-now deferral" of a spec element. Those phrases are patterns you are expected to refuse, not produce.
+- Do not write completion reports that recommend deferring a spec element to a later phase, to a follow-up task, or to the user. Do not suggest "minimum viable" or "essential parts only" scopings of a task that was specified in full.
+- If you cannot complete a spec element because the spec is ambiguous, take the Clarification Exit. That is the only authorized escape hatch — it opens a retry slot and surfaces the question to the user, instead of silently narrowing the scope.
+- If you cannot complete a spec element because it is technically impossible as written, take the Clarification Exit with Blocker `SPEC APPEARS IMPOSSIBLE` and a precise description of what you tried. Do not improvise an easier version of the task.
 
 ## Rules (reinforced)
 
