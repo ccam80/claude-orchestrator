@@ -57,7 +57,7 @@ coordinator (the skill instance)
   └─ wave-verifier (one per batch, after implementers complete)
 ```
 
-**Batches and task_groups.** The coordinator reads the phase spec, groups parallel waves into batches (sequential waves each get their own batch), and assigns tasks to task_groups — one task_group per implementer (`min(tasks, 4)` per batch).
+**Batches and task_groups.** The coordinator reads the phase spec, groups parallel waves into batches (sequential waves each get their own batch), and assigns tasks to task_groups — one task_group per implementer (`min(tasks, 6)` per batch).
 
 **State file (`spec/.hybrid-state.json`).** Written once by the coordinator at setup, then updated exclusively by scripts invoked by the subagents themselves. Combines per-batch counters with a `group_status` map (`pending`/`failed`/`passed`) per task_group. Persists across context compressions — if the coordinator is resumed mid-run, it re-reads the state file and picks up on the first batch whose `group_status` has any entry that is not `"passed"`.
 
