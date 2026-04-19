@@ -194,7 +194,7 @@ Before spawning anything, plan ALL batches for the current phase and write the s
 From the phase spec and `spec/plan.md`:
 - Identify which waves can run in parallel (the spec marks these explicitly).
 - Group parallel waves into a single **batch**. Sequential waves each get their own batch.
-- For each batch, determine the task_groups: one entry per implementer you will spawn. Assign tasks to groups based on complexity and parallelism (`min(tasks, 4)` groups per batch).
+- For each batch, determine the task_groups: one entry per implementer you will spawn. Assign tasks to groups based on complexity and parallelism (`min(tasks, 6)` groups per batch).
 
 For each task in each task_group, re-read its spec and decide whether it **requires the user** — i.e. the spec explicitly says the user must configure, provide, verify, deploy, or otherwise take a real-world action that no agent can perform. Record those task_ids under `user_required_tasks[group]`. Groups with no user-required task get an empty list. **Do not skip this step.** `mark-verified.sh` refuses to PASS any group whose user-required tasks are unacked, and the user can only ack tasks you listed here — if you forget a user-required task, the user cannot ack it and the group will stall.
 
