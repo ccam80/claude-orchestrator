@@ -55,58 +55,73 @@ After all reviewer `TaskOutput` calls return:
 
 ## Cleanup
 
-If violations were found:
+If violations were found, do NOT fix them inline and do NOT split the flow into "approve mechanicals, then decide non-mechanicals one by one." Everything gets presented in one pass, all answers are collected in one batched `AskUserQuestion`, then fix agents are spawned to execute the work.
 
 ### 1. Classify Violations
 
 Split all reported violations into two categories:
 
-**Mechanical** — can be fixed without changing behaviour:
+**Mechanical** — deterministic edit, no judgement:
 - `# TODO`, `# FIXME`, `# HACK` comments → remove
 - Commented-out code → remove
 - `pytest.skip()`, `pytest.xfail()`, `unittest.skip` decorators → remove (the test must run)
 - Dead imports (imports of removed modules/symbols) → remove
 - Backwards-compatibility re-exports or aliases → remove
+- Historical-provenance comments ("legacy", "fallback", "workaround", "temporary", "previously", "shim", "backwards compatible", "migrated from", "replaced") → delete the **code the comment decorates** along with the comment. The comment was placed by an agent that left dead or transitional code in place to avoid fixing tests. Removing only the comment while leaving the code is not a fix. If removing the code breaks tests, those tests were testing dead code and must be rewritten. This is still "mechanical" because the action is deterministic once identified — delete the decorated block — but a fix agent must do the deletion and fix collateral tests.
 
-**Mechanical but requires code deletion** — the comment is evidence of dead code, not the problem itself:
-- Historical-provenance comments (containing "legacy", "fallback", "workaround", "temporary", "previously", "shim", "backwards compatible", "migrated from", "replaced") → delete the **code the comment decorates** along with the comment. The comment was placed by an agent that left dead or transitional code in place to avoid fixing tests. Removing only the comment while leaving the code is not a fix. If removing the code breaks tests, those tests were testing dead code and must be rewritten.
-
-**Non-mechanical** — requires design decisions or new implementation:
+**Non-mechanical** — requires a decision or new implementation:
 - Missing implementations (`pass`, `raise NotImplementedError`)
 - Incomplete spec coverage (gaps)
 - Weak test assertions that need rewriting
 - Behavioural issues
 
-### 2. Present Classification
+### 2. Present Mechanical Violations as a Table
 
-Present both lists to the user. For non-mechanical violations, explain what decision or work is needed.
+Show Mechanical violations in a single table. No approval request is made on this alone — the approval happens in the batched question in step 4.
 
-### 3. Confirm Automatic Cleanup
+| ID | File:Line | Rule Violated | Action |
+|----|-----------|---------------|--------|
+| M1 | src/foo.py:42 | TODO comment | Remove the comment |
+| M2 | src/bar.py:10–28 | Historical-provenance comment decorates dead block | Delete the commented block and its decorator; rewrite `test_bar_legacy` |
 
-Ask the user to confirm automatic cleanup of mechanical violations. Do not proceed without confirmation.
+### 3. Present Non-Mechanical Violations (compact with options)
 
-### 4. Fix Mechanical Violations
+For each Non-Mechanical violation, present in this compact format:
 
-For each confirmed mechanical violation:
-- Read the file.
-- Remove the offending code (comment, decorator, import, etc.).
-- Verify the removal doesn't break surrounding code structure.
+```
+**{ID} — {short title}** ({severity})
+{1–3 line description: what the spec requires, what's currently there, what decision is needed.}
+Options:
+  A) {concrete fix — one short line}
+  B) {concrete fix — one short line}
+  (C) {concrete fix — one short line, if a meaningfully distinct third path exists}
+```
 
-Do not change any behaviour. Cleanup is purely subtractive — removing dead code, comments, and decorators.
+Full details (file path, line, quoted evidence, spec reference) stay in `spec/reviews/phase-{n}.md` — don't repeat them here.
 
-### 5. Flag Non-Mechanical Violations
+### 4. Collect All Answers in One Batch
 
-For non-mechanical violations, present each one to the user with:
-- The file and line
-- What the spec requires
-- What's currently there
-- What decision is needed
+Issue a single `AskUserQuestion` call containing:
+- One question: "Approve Mechanical fixes?" — choices: `all` / `subset (list IDs)` / `none`
+- One question per Non-Mechanical violation: which option — choices: `A` / `B` / `C` / `skip` / `custom (user writes instruction)`
 
-Let the user decide how to handle each one.
+Do not proceed until every question has an answer. If the user picks `custom`, take their free-text instruction as the fix directive verbatim.
+
+### 5. Batch and Spawn Fix Agents
+
+Consolidate all approved fixes, grouped by target file (or by logically-related file cluster for non-mechanical fixes that span files). For each cluster, spawn one `claude-orchestrator:implementer` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+
+Each fix-agent prompt contains:
+- The target file(s) to edit
+- The list of approved Mechanical actions (from the table, verbatim)
+- The list of resolved Non-Mechanical fixes (with the user's chosen option, or their custom instruction, as the edit directive)
+- A directive to make ONLY the specified edits, run any affected tests locally, and return a summary of what changed plus any tests that now fail
+
+Do not edit files yourself. Your job after spawning is to collect the summaries.
 
 ## Verification
 
-After cleanup is complete:
+After all fix agents have returned their summaries:
 
 1. Run the project's test suite. Check `spec/plan.md` and `CLAUDE.md` for the test command. Common commands:
    ```bash
@@ -117,19 +132,21 @@ After cleanup is complete:
    go test ./...
    ```
 2. If tests pass → report success.
-3. If tests fail → present failures to the user. Cleanup should never change behaviour, so failures indicate either:
-   - A mechanical fix that accidentally removed something load-bearing (undo it)
-   - A pre-existing test failure unrelated to cleanup
-   Ask the user how to proceed.
+3. If tests fail → present failures to the user alongside the fix-agent summaries. Failures may indicate:
+   - A mechanical fix that removed something load-bearing (the user decides whether to revert or rewrite the affected test)
+   - A non-mechanical fix that introduced a regression
+   - A pre-existing failure unrelated to this review
+   Do not unilaterally revert. Ask the user how to proceed.
 
 ## Report
 
 Present a final summary:
 - Phases reviewed
 - Violations found (by category)
-- Mechanical violations fixed
-- Non-mechanical violations flagged for user
-- Test results after cleanup
+- Mechanical fixes applied / skipped
+- Non-mechanical fixes applied (with chosen option) / skipped
+- Any fix-agent failures or partial applications
+- Test results after fixes
 
 ## Context Conservation
 
@@ -138,7 +155,8 @@ You are a coordinator. Protect your context:
 - **Use `TaskOutput` with `block=true` only.** Never poll with `block=false` — it wastes context on partial output. Spawn the Task, then call `TaskOutput(task_id, block=true)` when you need the result.
 - **Spawn-then-wait pattern:** For parallel execution, spawn multiple background Tasks in one message, then call `TaskOutput` for each in a subsequent message. For sequential execution, spawn one background Task and immediately `TaskOutput` it.
 - **Do not read implementation files yourself.** Rely on reviewer reports for quality information.
-- **Do not re-review after fixes.** The reviewer agents already identified the violations. Your fixes are mechanical removals — they don't need re-auditing.
+- **Do not edit files yourself.** Fix agents apply all edits. Your role is classification, presentation, batching user answers, spawning, and post-run reporting.
+- **Do not re-review after fixes.** The reviewer agents already identified the violations. Don't spawn another round of reviewers on the fix-agent output — trust the fix-agent summaries plus the test run.
 - Read `spec/progress.md` for file lists, not git diffs.
 
 ## Shell Safety (Windows)
@@ -154,5 +172,5 @@ This project runs on Windows with Git Bash. All bash commands (including the mat
 - You MUST run the materialize script during setup (step 6). It always overwrites, so it is safe to run after `implement-hybrid`.
 - Read `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md` once at the start to get the reviewer prompt template. Do not memorize it — refer back to the file when constructing each prompt.
 - All reviewer prompts are lean pointers to `spec/.context/`. Never embed agent instructions or rules in prompts.
-- Never fix non-mechanical violations without user direction.
-- Cleanup is subtractive only. Never add code, change logic, or modify test assertions during cleanup.
+- Never queue a fix-agent edit for a non-mechanical violation without the user picking an option (or supplying their own). Skip it and mark it deferred in the final summary.
+- The fix pass is no longer purely subtractive — non-mechanical fixes may add code, change logic, or rewrite test assertions per the user's chosen option. Mechanical cleanups remain subtractive (dead comments, dead code blocks, dead imports, skip decorators). Fix agents must respect this distinction per item.

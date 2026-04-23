@@ -129,23 +129,49 @@ Write to `spec/reviews/spec-review-combined.md`:
 
 ## Present Findings to User
 
-Present in two clearly separated sections, in this order:
+Present all findings in a single pass, then collect all user answers in one batch before spawning fix agents. Do NOT apply edits one-by-one and do NOT defer Decision-Required items until after Mechanical fixes are applied — everything is answered together, then executed together.
 
-### 1. Mechanical Fixes
-Show the full mechanical table from the combined report. Then ask the user (single `AskUserQuestion`) which of the following they want:
-- Apply ALL mechanical fixes
-- Apply a subset (user lists IDs)
-- Apply none / review individually first
+### 1. Mechanical Fixes Table
 
-If the user approves fixes, apply them with `Edit` directly to the spec files. After applying, report what was changed, file by file. Do not re-spawn review agents — these are mechanical edits, they don't need re-auditing.
+Show the full Mechanical Fixes table from the combined report. This is presentation only — no approval is requested here in isolation. The user will approve/subset in step 3.
 
-### 2. Decision-Required Items
-Present each Decision-Required item with its options and pros/cons. For each, ask the user which option they want (or to provide their own). Apply the user's chosen option directly with `Edit`. If the user defers an item, leave the spec unchanged and note it in your final summary.
+### 2. Decision-Required Items (compact)
 
-### 3. Final Summary
+For each Decision-Required item, present in this compact format (no long pros/cons — the full report at `spec/reviews/spec-phase-{n}.md` has those if the user wants them):
+
+```
+**{ID} — {short title}** ({severity})
+{1–3 line description of the problem and why it needs a decision.}
+Options:
+  A) {concrete fix — one short line}
+  B) {concrete fix — one short line}
+  (C) {concrete fix — one short line, if a meaningfully distinct third path exists}
+```
+
+### 3. Collect All Answers in One Batch
+
+Issue a single `AskUserQuestion` call containing:
+- One question: "Approve Mechanical fixes?" — choices: `all` / `subset (list IDs)` / `none`
+- One question per Decision-Required item: which option — choices: `A` / `B` / `C` / `skip` / `custom (user writes instruction)`
+
+Do not proceed until you have an answer for the mechanical-approval question AND every Decision-Required item. If the user picks `custom`, take their free-text instruction as the fix directive verbatim.
+
+### 4. Batch and Spawn Fix Agents
+
+Consolidate all approved fixes, grouped by spec file. For each spec file that needs edits, spawn one `claude-orchestrator:implementer` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+
+Each fix-agent prompt contains:
+- The spec file path to edit
+- The list of approved Mechanical edits with before/after text (verbatim from the Proposed Fix column)
+- The list of resolved Decision-Required edits (with the user's chosen option, or their custom instruction, as the edit directive)
+- A directive to make ONLY the specified edits and return a line-by-line summary of what changed
+
+Do not apply edits yourself with `Edit` — the fix agents do the work. Your job after spawning is to collect their summaries.
+
+### 5. Final Summary
 - Mechanical fixes applied / skipped (count by phase)
-- Decision-Required items resolved / deferred (count by phase)
-- Any items you couldn't apply and why
+- Decision-Required items resolved / skipped (count by phase)
+- Any edits the fix agents reported they couldn't apply, with reason
 - Whether the overall verdict is now `ready` or still `needs-revision`
 
 ## Context Conservation
@@ -168,7 +194,7 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 ## Important
 
 - Run the materialize script during setup (step 5).
-- Do not review specs yourself. Spawn review-spec agents for per-phase review. You do cross-phase checks, aggregation, and the user-facing fix loop.
-- You DO modify specs — but only after explicit user approval per the two-section presentation flow above. Mechanical fixes get a single batched approval; Decision-Required items get one approval each.
-- Never apply a Decision-Required item without the user picking an option (or supplying their own). "Probably option A" is not approval.
+- Do not review specs yourself. Spawn review-spec agents for per-phase review. You do cross-phase checks, aggregation, and the user-facing decision loop.
+- You do NOT apply edits yourself. Present findings in one pass, collect all user answers in one batched `AskUserQuestion`, then spawn `claude-orchestrator:implementer` agents (one per target spec file) to apply the approved edits.
+- Never queue a fix-agent edit for a Decision-Required item without the user picking an option (or supplying their own). "Probably option A" is not approval — skip it and report it as deferred.
 - The `claude-orchestrator:review-spec` agent type provides full review-spec instructions automatically. Do not redundantly point agents to `spec/.context/review-spec.md` if using the agent type.
