@@ -349,7 +349,7 @@ After all implementer Tasks return:
    ```
 5. Clean locks:
    ```bash
-   rm -rf "spec/.locks/tasks/"* "spec/.locks/files/"* 2>/dev/null
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/clear-locks.sh"
    ```
 
 #### 3. Spawn Wave Verifier
@@ -438,7 +438,7 @@ After all batches in a phase are verified:
 3. Clean up:
    ```bash
    rm -f "spec/.hybrid-state.json"
-   rm -rf "spec/.locks/"
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/clear-locks.sh" --purge
    ```
 
 ## Context Conservation (Critical)
