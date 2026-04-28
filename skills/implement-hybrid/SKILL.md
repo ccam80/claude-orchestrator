@@ -148,9 +148,10 @@ Each **task_group** is one implementer's assignment — the tasks that one agent
 
 ### Spawn Conditions
 
-**Implementer allowed when ALL true:**
-1. `spawned < len(task_groups) + verifications_failed + stops_for_clarification + dead_implementers` — total slot cap (initial slots, plus one retry slot per historical failure, clarification stop, or dead implementer)
-2. `verifications_passed + verifications_failed >= completed` — all completed work has been reviewed (clarification stops and dead implementers do not contribute to `completed`, so they do not block this check)
+**Implementer allowed when:**
+- `spawned < len(task_groups) + verifications_failed + stops_for_clarification + dead_implementers` — total slot cap (initial slots, plus one retry slot per historical failure, clarification stop, or dead implementer)
+
+There is no "must verify before more spawns" gate. While first-pass implementers are running, you may freely mark dead agents and spawn replacements until every task_group has a finished implementer. Verification happens once at the end of the batch, after all task_groups have at least one completed implementer.
 
 **Verifier allowed when ALL true:**
 1. At least one task_group in `group_status` is not yet `"passed"` — the batch is not fully verified
@@ -158,12 +159,23 @@ Each **task_group** is one implementer's assignment — the tasks that one agent
 
 **Batch is fully verified when** every task_group in `group_status` equals `"passed"`. This replaces the old `verifications_passed >= len(task_groups)` check, which could silently accept over-counted verdicts when retry verifiers padded the verdict string with PASS tokens for already-passed groups.
 
+### Verifier Fan-Out (one verifier per 4 task_groups)
+
+A single wave-verifier verifying many task_groups at once becomes overloaded — it has to read many spec files, audit many file lists, and produce many verdicts in a single context. Split the verification across multiple verifiers when the unreviewed task_group list is long.
+
+Rule: spawn `ceil(unreviewed_task_groups / 4)` verifiers in parallel, each assigned a disjoint subset of up to 4 task_groups from the unreviewed list. All verifiers run on the same batch concurrently; each calls `mark-verified.sh` independently with a verdict map covering only its assigned task_groups. The script accepts concurrent verdicts as long as no two verifiers were assigned the same task_group (and they cannot be — you produce disjoint subsets).
+
+Examples:
+- 1–4 unreviewed task_groups → 1 verifier
+- 5–8 unreviewed task_groups → 2 verifiers (e.g. 4 and 4, or 4 and the rest)
+- 9–12 unreviewed task_groups → 3 verifiers
+- and so on
+
 ### If a Hook Blocks You
 
 If you see a `BLOCKED:` message:
 
-- **"spawn_cap"** — all implementer slots used. Spawn a wave-verifier to review completed work. Retry slots are added by failed verifications, clarification stops (`stops_for_clarification`), and dead implementers (`dead_implementers`).
-- **"unreviewed_work"** — completed implementations haven't been verified. Spawn a wave-verifier.
+- **"spawn_cap"** — all implementer slots used. If every task_group already has a finished implementer, spawn wave-verifiers (one per 4 task_groups). Retry slots are added by failed verifications, clarification stops (`stops_for_clarification`), and dead implementers (`dead_implementers`).
 - **"nothing_to_verify"** — no unreviewed work. Wait for implementers to complete, or check if the batch is already done.
 - **"all_batches_verified"** — all batches are done. Proceed to cleanup.
 
@@ -352,20 +364,24 @@ After all implementer Tasks return:
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/clear-locks.sh"
    ```
 
-#### 3. Spawn Wave Verifier
+#### 3. Spawn Wave Verifier(s) — fan out at 1 per 4 task_groups
 
-Spawn the wave-verifier as a background Task:
+Wait until every task_group in the batch has a finished implementer (i.e. `completed + stops_for_clarification + dead_implementers == spawned`, with no unresolved clarification stops outstanding). Only then move to verification.
+
+Before assembling prompts, read `spec/.hybrid-state.json` and compute the list of **unreviewed task_groups** for the active batch — every task_group whose `group_status` is either `"pending"` (never verified) or `"failed"` (verified FAIL and subsequently retried). This is the exact list to verify in this round; already-`"passed"` groups must not be re-verified, and `mark-verified.sh` will reject them if any verifier tries.
+
+Split the unreviewed list into **disjoint chunks of up to 4 task_groups each** (`ceil(n / 4)` chunks total). Spawn one wave-verifier per chunk, ALL **in a single message** as background Tasks:
 
 - **subagent_type**: `claude-orchestrator:wave-verifier`
 - **model**: `sonnet`
 - **run_in_background**: `true`
-- **description**: `"Verify batch {batch_id}"`
+- **description**: `"Verify batch {batch_id} chunk {i}/{total}"`
 
-The PreToolUse hook checks that unreviewed completed work exists before allowing the spawn.
+Each verifier gets only its assigned chunk in its prompt — never the full unreviewed list. A verifier asked to verify 1–4 task_groups stays focused; one asked to verify 8+ overloads its context, drops findings, and pads verdict maps. The chunk size cap is the entire point of the fan-out.
 
-Before assembling the prompt, read `spec/.hybrid-state.json` and compute the list of **unreviewed task_groups** for the active batch — every task_group whose `group_status` is either `"pending"` (never verified) or `"failed"` (verified FAIL and subsequently retried). This is the exact list the verifier must verify in this run; already-`"passed"` groups must not be re-verified, and `mark-verified.sh` will reject them if the verifier tries.
+The PreToolUse hook checks that unreviewed completed work exists before allowing each spawn. Concurrent verifiers on the same batch are fine: each writes only its own task_groups via `mark-verified.sh`, and the script rejects duplicate or already-passed entries server-side.
 
-Use this prompt template:
+Use this prompt template (one filled-in copy per verifier):
 
 ```markdown
 # Wave Verification Assignment
@@ -377,11 +393,11 @@ Use this prompt template:
 ## Batch: {batch_id}
 - **Phase**: {phase_name}
 - **Phase spec file**: spec/phase-{n}-{name}.md
-- **Unreviewed task_groups to verify in this run**: {unreviewed_task_group_list}
-- **Tasks per group**: {tasks_per_group restricted to unreviewed groups}
+- **Your assigned chunk (verify ONLY these task_groups)**: {chunk_task_group_list}  ← max 4
+- **Tasks per group**: {tasks_per_group restricted to your chunk}
 - **Test Command**" {test command from CLAUDE.md including usage hints if they exist}
 
-Verify ONLY the task_groups listed above. Do NOT emit a verdict for any task_group that is not in this list — those are already passed and re-verifying them is a counter-corruption bug the state file will reject.
+Verify ONLY the task_groups listed above. Other verifiers are running concurrently on other chunks of the same batch. Do NOT emit a verdict for any task_group not in your chunk — duplicates and already-passed entries are rejected server-side and re-verifying is a counter-corruption bug.
 
 ## Test Command
 {test_command from CLAUDE.md or spec/plan.md}
@@ -395,21 +411,25 @@ Read these files before doing anything else:
 - `spec/test-baseline.md` — pre-existing test failures
 ```
 
-**Wait for the verifier to complete** via `TaskOutput(task_id, block=true)`.
+**Wait for every verifier to complete** by calling `TaskOutput(task_id, block=true)` for each verifier you spawned, in a follow-up message.
 
-The wave-verifier invokes `mark-verified.sh '<json-verdict-map>'` as its own final bash call, passing a JSON object whose keys are the unreviewed task_group IDs it verified and whose values are `PASS` or `FAIL` (e.g. `'{"0.1.a":"PASS","0.1.c":"FAIL"}'`). That script updates `group_status` per task_group and increments `verifications_passed` / `verifications_failed`.
+Each wave-verifier invokes `mark-verified.sh '<json-verdict-map>'` as its own final bash call, passing a JSON object whose keys are ONLY the task_group IDs from its assigned chunk and whose values are `PASS` or `FAIL` (e.g. `'{"0.1.a":"PASS","0.1.c":"FAIL"}'`). That script updates `group_status` per task_group and increments `verifications_passed` / `verifications_failed`. Concurrent verifiers writing disjoint chunks are safe — the script validates each entry before applying any.
 
-After `TaskOutput` returns, re-read `spec/.hybrid-state.json` to confirm `group_status` advanced for the expected task_groups. If it did not (verifier died before running its recording script), invoke `mark-dead-verifier.sh` and spawn a replacement verifier with the same unreviewed task_group list — no other counter surgery is needed, because a dead verifier leaves the verification counters and `group_status` untouched. Cross-check the verifier's returned report `## Verdict` JSON map against `group_status` — if they disagree, trust the state file and investigate the discrepancy before proceeding.
+After all `TaskOutput` calls return, re-read `spec/.hybrid-state.json` to confirm `group_status` advanced for every task_group across every chunk. For each chunk:
+- If its `group_status` entries advanced as expected → proceed.
+- If they did not (that verifier died before running its recording script) → invoke `mark-dead-verifier.sh` once per dead verifier and spawn replacements with the same chunk assignment. A dead verifier leaves `verifications_passed` / `verifications_failed` / `group_status` untouched, so the gate will allow the replacement automatically.
+
+Cross-check each verifier's returned report `## Verdict` JSON map against `group_status` — if they disagree, trust the state file and investigate the discrepancy before proceeding.
 
 #### 4. Handle Verification Failure
 
-If the verifier reported failures:
+If any verifier reported failures (consolidate across all chunks):
 
-1. Read the verifier's output — specifically the **Failure Summary** section listing every reason for failure per task group.
+1. Read every verifier's output — specifically the **Failure Summary** section listing each reason for failure per task group. Aggregate the failed groups across chunks.
 
 2. Spawn fix implementers for the failed groups. The gate allows this because `verifications_failed` increased the spawn cap. Use the implementer prompt template with the fix tasks and failure reasons.
 
-3. Wait for fix agents, then spawn the verifier again to re-verify.
+3. Wait for fix agents to finish (using `complete-implementer.sh` / clarification / dead-implementer recovery as needed), then run another verification round. The new unreviewed list is exactly the previously-failed groups — so this round usually fits in one verifier (≤4 groups) but still apply the fan-out rule if it doesn't.
 
 4. If still failing after 2 fix rounds → report to user. Ask how to proceed.
 
@@ -451,10 +471,10 @@ You are a long-running coordinator. Protect your context aggressively:
 - **Never read full git diffs.** Use `git diff --shortstat` if needed.
 - **Read phase spec files once per phase**, not per batch.
 - **State file enables recovery.** If context compresses, re-read `spec/.hybrid-state.json`. The combination of counters and `group_status` tells you exactly where you are on the active batch (first batch whose `group_status` has any entry that is not `"passed"`):
-  - `spawned < len(task_groups) + verifications_failed + stops_for_clarification + dead_implementers` and at least one group is still `"pending"` → room to spawn more implementers for first-pass work or retries.
-  - `completed + stops_for_clarification + dead_implementers < spawned` → still waiting for implementers to finish (normally, via clarification, or to be declared dead).
-  - `completed > verifications_passed + verifications_failed` → unreviewed completed work exists, spawn a verifier.
-  - Some task_groups have `group_status == "failed"` and the last verifier run is done → spawn retry implementers for those specific groups.
+  - `spawned < len(task_groups) + verifications_failed + stops_for_clarification + dead_implementers` → room to spawn more implementers (first-pass work, dead-agent retries, clarification retries, or fix retries — no verification gate blocks this).
+  - `completed + stops_for_clarification + dead_implementers < spawned` → still waiting for implementers to finish (normally, via clarification, or to be declared dead). Mark dead and respawn until the batch fills out.
+  - Every task_group has a finished implementer AND `completed > verifications_passed + verifications_failed` → spawn `ceil(unreviewed_groups / 4)` verifiers in parallel, each on a disjoint chunk of up to 4 task_groups.
+  - Some task_groups have `group_status == "failed"` and the last verifier run is done → spawn retry implementers for those specific groups, then re-verify them.
   - Every task_group has `group_status == "passed"` → batch done, move to the next one.
 
 ## User-Required Task Gate

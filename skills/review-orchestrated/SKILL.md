@@ -1,13 +1,13 @@
 ---
 name: review-orchestrated
-description: Review completed implementation against specs and rules. Spawns reviewer agents per phase, presents findings, then fixes mechanical violations with user approval.
+description: Review completed implementation against specs and rules. Spawns reviewer agents per phase, applies an internal auto-fix ruleset, and presents only true decisions to the user in a single combined output.
 argument-hint: <phase name or number, or blank for all completed phases>
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskOutput, AskUserQuestion]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskOutput]
 ---
 
 # Review Orchestrated
 
-You are the top-level review coordinator. You read specs, spawn reviewer agents per phase, present consolidated findings, and fix mechanical violations with user approval.
+You are the top-level review coordinator. You read specs, spawn reviewer agents per phase, apply an internal auto-fix ruleset to classify findings, and present a single combined output: queued auto-fixes (informational) plus any remaining user decisions with options. The user replies in chat for the decisions only — there is no Q&A flow.
 
 ## Setup
 
@@ -55,67 +55,64 @@ After all reviewer `TaskOutput` calls return:
 
 ## Cleanup
 
-If violations were found, do NOT fix them inline and do NOT split the flow into "approve mechanicals, then decide non-mechanicals one by one." Everything gets presented in one pass, all answers are collected in one batched `AskUserQuestion`, then fix agents are spawned to execute the work.
+If violations were found, do NOT fix them inline. Apply the **Auto-Fix Ruleset** below to classify each violation, then present everything in a single combined output (no `AskUserQuestion`, no Q&A format). The user replies in chat with their decisions for the decision-required items only.
 
-### 1. Classify Violations
+### 1. Apply the Auto-Fix Ruleset
 
-Split all reported violations into two categories:
+For each violation, ask: "does this require a decision from the user?" If the answer matches one of the rules below, the answer is no — there is one correct fix and the agent must execute it without asking. Do not split items into "mechanical" vs "non-mechanical" buckets, do not present them for approval, do not ask whether to apply them. Just queue the fix agent.
 
-**Mechanical** — deterministic edit, no judgement:
-- `# TODO`, `# FIXME`, `# HACK` comments → remove
-- Commented-out code → remove
-- `pytest.skip()`, `pytest.xfail()`, `unittest.skip` decorators → remove (the test must run)
-- Dead imports (imports of removed modules/symbols) → remove
-- Backwards-compatibility re-exports or aliases → remove
-- Historical-provenance comments ("legacy", "fallback", "workaround", "temporary", "previously", "shim", "backwards compatible", "migrated from", "replaced") → delete the **code the comment decorates** along with the comment. The comment was placed by an agent that left dead or transitional code in place to avoid fixing tests. Removing only the comment while leaving the code is not a fix. If removing the code breaks tests, those tests were testing dead code and must be rewritten. This is still "mechanical" because the action is deterministic once identified — delete the decorated block — but a fix agent must do the deletion and fix collateral tests.
+**Auto-fix (no decision required):**
 
-**Non-mechanical** — requires a decision or new implementation:
-- Missing implementations (`pass`, `raise NotImplementedError`)
-- Incomplete spec coverage (gaps)
-- Weak test assertions that need rewriting
-- Behavioural issues
+| Pattern | Correct fix |
+|---------|-------------|
+| Agent did not complete the task to spec (gap, missing implementation, `pass`, `raise NotImplementedError`, partial coverage, scope-narrowed deliverable) | Complete the task to spec exactly as written. The spec is the contract; there is nothing to decide. |
+| Weak test assertion (`is not None`, bare `isinstance`, `len(x) > 0` without content checks, trivially-true asserts, `pytest.approx` with loose tolerances, mocks where the spec did not call for mocks) | Rewrite the assertion to verify the desired behaviour, AND identify what the weak assertion was hiding (regression, missing coverage, broken behaviour). Report the discovery alongside the fix. |
+| Historical-provenance / legacy / fallback comment ("legacy", "fallback", "workaround", "temporary", "previously", "shim", "backwards compatible", "migrated from", "replaced") | Read the spec for the decorated code. Confirm the code is exactly spec-compliant. If yes → delete just the comment. If no → delete the comment AND the decorated code; fix any tests that depended on the dead code path. |
+| `# TODO`, `# FIXME`, `# HACK` comments | Remove the comment. If it marked unfinished work, complete the work to spec. |
+| Commented-out code | Remove. |
+| `pytest.skip()`, `pytest.xfail()`, `unittest.skip` decorators / soft assertions | Remove the decorator so the test runs. If it then fails, the test was hiding a real bug — fix the bug. |
+| Dead imports (imports of removed modules/symbols) | Remove. |
+| Backwards-compatibility re-exports, deprecated wrappers, feature flags toggling old/new behaviour | Remove. |
 
-### 2. Present Mechanical Violations as a Table
+**Decision required:** anything not covered by the rules above — typically a behavioural choice with multiple valid implementations, an ambiguous spec passage, or a finding the reviewer flagged as needing user input.
 
-Show Mechanical violations in a single table. No approval request is made on this alone — the approval happens in the batched question in step 4.
+### 2. Single-Pass Output
 
-| ID | File:Line | Rule Violated | Action |
-|----|-----------|---------------|--------|
-| M1 | src/foo.py:42 | TODO comment | Remove the comment |
-| M2 | src/bar.py:10–28 | Historical-provenance comment decorates dead block | Delete the commented block and its decorator; rewrite `test_bar_legacy` |
-
-### 3. Present Non-Mechanical Violations (compact with options)
-
-For each Non-Mechanical violation, present in this compact format:
+Emit one combined message to the user, structured exactly as follows. Do NOT use `AskUserQuestion`. Do NOT split into multiple turns. Do NOT ask the user to approve auto-fixes — they are already queued.
 
 ```
-**{ID} — {short title}** ({severity})
-{1–3 line description: what the spec requires, what's currently there, what decision is needed.}
-Options:
+## Auto-fixes queued (no decision required)
+- {file:line} — {one-line description of the fix that will be applied}
+- {file:line} — {…}
+
+## Decisions needed
+**D1 — {short title}** ({severity})
+{1–2 line description: what the spec requires, what's currently there, what choice the user must make.}
   A) {concrete fix — one short line}
   B) {concrete fix — one short line}
-  (C) {concrete fix — one short line, if a meaningfully distinct third path exists}
+  (C) {…optional third path…}
+
+**D2 — …**
 ```
 
-Full details (file path, line, quoted evidence, spec reference) stay in `spec/reviews/phase-{n}.md` — don't repeat them here.
+Full details (file path, line, quoted evidence, spec reference) stay in `spec/reviews/phase-{n}.md` — don't repeat them here. The auto-fix list is informational so the user can spot-check; the decisions list is the only thing they need to respond to.
 
-### 4. Collect All Answers in One Batch
+If there are no decision-required items, say so explicitly ("No decisions needed — auto-fixes will be applied.") and proceed to step 4 without waiting for a reply.
 
-Issue a single `AskUserQuestion` call containing:
-- One question: "Approve Mechanical fixes?" — choices: `all` / `subset (list IDs)` / `none`
-- One question per Non-Mechanical violation: which option — choices: `A` / `B` / `C` / `skip` / `custom (user writes instruction)`
+### 3. Wait for User Reply (only if decisions exist)
 
-Do not proceed until every question has an answer. If the user picks `custom`, take their free-text instruction as the fix directive verbatim.
+The user replies in chat with their picks (e.g. "D1: B, D2: A, D3: custom — {instruction}"). If they pick `custom` for any item, take their free-text instruction as the fix directive verbatim. Do not proceed to spawning until every decision item has an answer.
 
-### 5. Batch and Spawn Fix Agents
+### 4. Batch and Spawn Fix Agents
 
-Consolidate all approved fixes, grouped by target file (or by logically-related file cluster for non-mechanical fixes that span files). For each cluster, spawn one `claude-orchestrator:implementer` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+Consolidate all queued fixes (auto-fixes + user-resolved decisions), grouped by target file or by logically-related file cluster for fixes that span files. For each cluster, spawn one `claude-orchestrator:implementer` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
 
 Each fix-agent prompt contains:
 - The target file(s) to edit
-- The list of approved Mechanical actions (from the table, verbatim)
-- The list of resolved Non-Mechanical fixes (with the user's chosen option, or their custom instruction, as the edit directive)
+- The list of fixes to apply, each labelled with its type (auto-fix or user-decision) and the verbatim fix directive
 - A directive to make ONLY the specified edits, run any affected tests locally, and return a summary of what changed plus any tests that now fail
+- For weak-test auto-fixes: a directive to also report what the weak assertion was hiding (regression, missing coverage, broken behaviour) so it surfaces in the summary
+- For legacy/fallback-comment auto-fixes: a directive to first verify the decorated code against the spec; delete just the comment if compliant, delete code+comment if not, and fix collateral tests in either case
 
 Do not edit files yourself. Your job after spawning is to collect the summaries.
 
@@ -133,18 +130,19 @@ After all fix agents have returned their summaries:
    ```
 2. If tests pass → report success.
 3. If tests fail → present failures to the user alongside the fix-agent summaries. Failures may indicate:
-   - A mechanical fix that removed something load-bearing (the user decides whether to revert or rewrite the affected test)
-   - A non-mechanical fix that introduced a regression
+   - An auto-fix that removed something load-bearing (the user decides whether to revert or rewrite the affected test)
+   - A user-decision fix that introduced a regression
    - A pre-existing failure unrelated to this review
+   - A weak test whose strong replacement is now correctly failing on a real bug — fix the bug, not the test
    Do not unilaterally revert. Ask the user how to proceed.
 
 ## Report
 
 Present a final summary:
 - Phases reviewed
-- Violations found (by category)
-- Mechanical fixes applied / skipped
-- Non-mechanical fixes applied (with chosen option) / skipped
+- Total violations found
+- Auto-fixes applied (with discovery notes for weak-test fixes — what the weak assertion was hiding)
+- User-decision fixes applied (with chosen option) / skipped
 - Any fix-agent failures or partial applications
 - Test results after fixes
 
@@ -155,7 +153,7 @@ You are a coordinator. Protect your context:
 - **Use `TaskOutput` with `block=true` only.** Never poll with `block=false` — it wastes context on partial output. Spawn the Task, then call `TaskOutput(task_id, block=true)` when you need the result.
 - **Spawn-then-wait pattern:** For parallel execution, spawn multiple background Tasks in one message, then call `TaskOutput` for each in a subsequent message. For sequential execution, spawn one background Task and immediately `TaskOutput` it.
 - **Do not read implementation files yourself.** Rely on reviewer reports for quality information.
-- **Do not edit files yourself.** Fix agents apply all edits. Your role is classification, presentation, batching user answers, spawning, and post-run reporting.
+- **Do not edit files yourself.** Fix agents apply all edits. Your role is auto-fix-ruleset classification, single-pass presentation, collecting user replies for decision items, spawning, and post-run reporting.
 - **Do not re-review after fixes.** The reviewer agents already identified the violations. Don't spawn another round of reviewers on the fix-agent output — trust the fix-agent summaries plus the test run.
 - Read `spec/progress.md` for file lists, not git diffs.
 
@@ -172,5 +170,7 @@ This project runs on Windows with Git Bash. All bash commands (including the mat
 - You MUST run the materialize script during setup (step 6). It always overwrites, so it is safe to run after `implement-hybrid`.
 - Read `${CLAUDE_PLUGIN_ROOT}/references/handoff-templates.md` once at the start to get the reviewer prompt template. Do not memorize it — refer back to the file when constructing each prompt.
 - All reviewer prompts are lean pointers to `spec/.context/`. Never embed agent instructions or rules in prompts.
-- Never queue a fix-agent edit for a non-mechanical violation without the user picking an option (or supplying their own). Skip it and mark it deferred in the final summary.
-- The fix pass is no longer purely subtractive — non-mechanical fixes may add code, change logic, or rewrite test assertions per the user's chosen option. Mechanical cleanups remain subtractive (dead comments, dead code blocks, dead imports, skip decorators). Fix agents must respect this distinction per item.
+- Never queue a fix-agent edit for a decision-required violation without the user picking an option (or supplying their own). Skip it and mark it deferred in the final summary.
+- Auto-fixes execute without user approval — the ruleset already determined the correct action. Do not present an auto-fix as a question, do not delay it for confirmation, do not include it in any list of decisions. The auto-fix list in the single-pass output is informational only.
+- Never use `AskUserQuestion` for review findings. The single-pass output and a free-form chat reply for decision items is the only supported flow. Q&A format is explicitly banned.
+- Auto-fixes may add, rewrite, or delete code: a spec gap fix adds the missing implementation; a weak-test fix rewrites the assertion (and may surface a real bug to fix); a legacy-comment fix may delete the decorated code along with the comment. Fix agents must apply each auto-fix according to the rule that triggered it, not as a generic "remove this line" instruction.

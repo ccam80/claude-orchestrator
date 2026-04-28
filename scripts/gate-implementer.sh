@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 
 # gate-implementer.sh — PreToolUse hook for claude-orchestrator:implementer
-# Counter-based gate: checks spawn conditions, increments spawned on allow.
+# Counter-based gate: checks the spawn cap, increments spawned on allow.
 #
-# Spawn conditions (ALL must be true):
-#   1. spawned < len(task_groups) + verifications_failed
-#                                  + stops_for_clarification
-#                                  + dead_implementers
-#   2. verifications_passed + verifications_failed >= completed
+# Spawn condition:
+#   spawned < len(task_groups) + verifications_failed
+#                              + stops_for_clarification
+#                              + dead_implementers
+#
+# The coordinator may spawn implementers (initial work, dead-agent retries,
+# clarification retries, failed-verification retries) freely up to this cap.
+# Verification happens once at the end of a batch — the gate does NOT block
+# implementer spawns on unreviewed completed work.
 #
 # Filters by subagent_type internally.
 #
@@ -65,29 +69,19 @@ result=$(node -e "(() => {
 
   const tg = (batch.task_groups || []).length;
   const spawned = batch.spawned || 0;
-  const completed = batch.completed || 0;
-  const passed = batch.verifications_passed || 0;
   const failed = batch.verifications_failed || 0;
   const clarif = batch.stops_for_clarification || 0;
   const dead = batch.dead_implementers || 0;
   const cap = tg + failed + clarif + dead;
 
-  // Condition 1: haven't exceeded slots (initial + retries from failures,
-  // clarification stops, and dead implementers)
+  // Spawn cap: initial slots + retries from failures, clarification stops,
+  // and dead implementers. The coordinator may fill the batch (including
+  // dead-agent retries) before any verification has happened.
   if (spawned >= cap) {
     console.log('BLOCK:' + JSON.stringify({
       id: batch.id, reason: 'spawn_cap',
       spawned, cap, task_groups: tg, failed,
       stops_for_clarification: clarif, dead_implementers: dead
-    }));
-    return;
-  }
-
-  // Condition 2: all completed work must be reviewed before spawning more
-  if (completed > 0 && (passed + failed) < completed) {
-    console.log('BLOCK:' + JSON.stringify({
-      id: batch.id, reason: 'unreviewed_work',
-      completed, reviewed: passed + failed
     }));
     return;
   }
@@ -113,11 +107,7 @@ reason=$(node -e "console.log(JSON.parse(process.argv[1]).reason)" "$info" 2>/de
 if [ "$reason" = "spawn_cap" ]; then
   spawned=$(node -e "console.log(JSON.parse(process.argv[1]).spawned)" "$info" 2>/dev/null)
   cap=$(node -e "console.log(JSON.parse(process.argv[1]).cap)" "$info" 2>/dev/null)
-  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap). Spawn a wave-verifier to verify completed work. Failed verifications, clarification stops, and dead implementers each add retry slots." >&2
-elif [ "$reason" = "unreviewed_work" ]; then
-  completed=$(node -e "console.log(JSON.parse(process.argv[1]).completed)" "$info" 2>/dev/null)
-  reviewed=$(node -e "console.log(JSON.parse(process.argv[1]).reviewed)" "$info" 2>/dev/null)
-  echo "BLOCKED: Batch '$batch_id' — completed implementations ($completed) exceed reviews ($reviewed). Spawn a wave-verifier before spawning more implementers." >&2
+  echo "BLOCKED: Batch '$batch_id' — all implementer slots used (spawned=$spawned, cap=$cap). If every group has a finished implementer, spawn wave-verifiers (one per 4 task_groups). Failed verifications, clarification stops, and dead implementers each add retry slots." >&2
 fi
 echo "State file: $STATE_FILE" >&2
 exit 2
