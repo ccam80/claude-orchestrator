@@ -73,9 +73,23 @@ The last phase of every plan is a complete audit for any remaining legacy refere
 
 **Non-Goals**: Explicitly exclude things that might seem in scope but aren't. This prevents scope creep during implementation.
 
-**Phases**: Group related work into phases numbered in **execution order**, not conceptual grouping. Phases that can start in parallel after the same dependency should have consecutive numbers. For example, if Phases A, B, and C all depend only on Phase 1, they should be numbered 2, 3, 4 — not 2, 3, 7. The numbering must reflect when work can actually begin, so a reader can see at a glance which phases are parallelizable and which are sequential.
+**Phases**: Phases exist to maximise parallel execution and provide clean verification boundaries. They are NOT for narrative grouping, conceptual themes, or "keeping related ideas together." The narrative is the whole plan; phases are an execution-graph tool.
 
-Each phase should be independently verifiable — when it's done, you can confirm it works without needing later phases.
+Phase boundaries are decided by two criteria, in this order:
+
+1. **Parallelisability**: Independent work that does not need each other's output goes into sibling phases (same parallel tier in the dependency graph). Sequential work — where Phase B genuinely needs Phase A's output — goes into a downstream phase.
+2. **File locality**: The same file should not be touched by more than one phase. Group all changes to a given file into a single phase wherever the dependency graph allows it. Splitting a file across phases multiplies agent context (each phase's agents must re-read the file, re-understand it, and re-coordinate edits) and creates merge friction with no benefit.
+
+**Anti-patterns to avoid:**
+- "Phase 2: Models, Phase 3: Services, Phase 4: API" when models, services, and API for the same feature could be one phase per feature — splitting by layer scatters every feature across every phase and forces every agent to load every layer.
+- "Phase 2: Refactor `foo.py`, Phase 5: Add new behaviour to `foo.py`" — both phases now require deep knowledge of `foo.py`; collapse them.
+- Splitting a coherent change across phases because the changes "feel like different ideas." If they touch the same files and one does not depend on the other's runtime output, they belong together.
+
+**The two mandatory phases are the only allowed exceptions.** Phase 0 (Dead Code Removal) and the Final Phase (Legacy Reference Review) are themed-by-purpose, not by file locality. They span whatever files contain dead or stale references — file-locality grouping does not apply. Do not try to fold either into a feature phase, and do not split them by file-locality. They are the only phases where "narrative purpose" defines the boundary; every other phase must follow the parallelisability + file-locality rule.
+
+Number phases in **execution order**. Phases that can start in parallel after the same dependency should have consecutive numbers. For example, if Phases A, B, and C all depend only on Phase 1, they should be numbered 2, 3, 4 — not 2, 3, 7. The numbering must reflect when work can actually begin, so a reader can see at a glance which phases are parallelizable and which are sequential.
+
+Each phase must be independently verifiable — when it's done, you can confirm it works without needing later phases. If a "phase" cannot be verified on its own, it isn't a phase boundary; merge it with the phase that completes its contract.
 
 Include a **dependency graph** in the plan showing the execution topology. Use a simple ASCII diagram showing which phases depend on which, and which can run in parallel. Example:
 
@@ -137,3 +151,4 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 - Surface dependencies between tasks explicitly.
 - Keep task granularity appropriate — each task should be completable by a single agent in one session.
 - Ensure wave ordering respects dependencies (a task can't use something built in a later wave).
+- Phase boundaries are an execution-graph tool, not a narrative tool. Group by parallelisability and file locality, not by concept or layer. The same file should appear in at most one phase wherever the dependency graph allows.

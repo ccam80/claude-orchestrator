@@ -107,18 +107,18 @@ rm -rf "spec/.locks/tasks/${TASK_ID}"
 
 ### 7. Self-Continuation
 
-After completing (or skipping) a task, check for more work:
+After completing (or skipping) a task, check for more work **within your assigned task_group only**. You may not pick up tasks belonging to a sibling task_group, even if their locks happen to be free — sibling task_groups have their own implementer, and the wave-verifier issues a PASS/FAIL per task_group based on what that group's implementer produced. Crossing task_group boundaries corrupts the per-group verdict model.
 
-1. Review the available tasks list from your assignment.
-2. Check which tasks are unlocked:
+1. Start from your assignment's "Available Tasks" list — this is the authoritative scope of work you may take. Do not consider any task_id that is not on that list.
+2. From that list, filter out tasks already recorded as complete in `spec/progress.md`.
+3. From the remaining tasks, filter out any whose task lock is held:
    ```bash
    ls "spec/.locks/tasks/" 2>/dev/null
    ```
-   Any task ID NOT in that listing AND not already recorded as complete in progress.md is available.
-3. Read `spec/progress.md` to check what's already been completed.
-4. Read the task spec from the phase spec file for the next available task.
-5. If an available task exists AND you estimate you have sufficient context budget remaining → go to step 1 with the new task.
-6. If no tasks available OR context is getting large → proceed to step 8.
+   A task in your assignment whose ID appears in that listing is held by another implementer (or by a stale lock you should leave alone); skip it.
+4. Read the spec for the next eligible task from the phase spec file.
+5. If an eligible task exists AND you estimate you have sufficient context budget remaining → go to step 1 with the new task.
+6. If no eligible tasks remain in your assignment OR context is getting large → proceed to step 8.
 
 ### 7b. Clarification Exit (Alternative to Steps 8–9)
 
@@ -198,13 +198,12 @@ This project runs on Windows with Git Bash. All bash commands MUST follow the Sh
 
 ## User-Required Tasks (Hard Stop Gate)
 
-Tasks whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") are **hard stop gates**. You cannot complete these tasks by deferring the user action in any form, and you cannot run the user's confirmation script on their behalf:
+See `spec/.context/rules.md` §**User-Required Tasks** for the full rules — they apply to all agents. Implementer-specific summary:
 
-- The only valid user confirmation is the user personally running `bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<evidence>"` in their own terminal. That script is blocked by a PreToolUse hook for all Claude-initiated bash calls — you will be exit-2'd if you try to run it, and even if the hook were absent, running it yourself is a rule violation equivalent to forging the user's signature.
-- If your assigned task requires user action, you MUST take the **Clarification Exit** path (step 7b). In the `CLARIFICATION NEEDED` entry, set the **Blocker** to `USER ACTION REQUIRED` and describe exactly what the user must do, including the exact ack command the coordinator should hand to the user.
-- You may NOT substitute placeholder values, write TODO comments, add "to be configured later" notes, or stub out functionality that assumes the user will act later. Any of these is treated as a rule violation equivalent to `raise NotImplementedError`.
-- You may NOT mark a user-required task as `complete` or `partial` in `spec/progress.md`. The only valid exit for a user-required task you cannot resolve is the Clarification Exit.
-- If only part of your task requires user action, implement everything you can, then take the Clarification Exit for the remainder. Do not mark the task as complete.
+- If your assigned task requires user action, take the **Clarification Exit** (step 7b) with Blocker `USER ACTION REQUIRED`. Include the exact `ack-user-gate.sh` command the coordinator should hand to the user.
+- Never run `ack-user-gate.sh` yourself — a PreToolUse hook blocks it, and it would be a rule violation regardless.
+- Never mark a user-required task `complete` or `partial`. Clarification Exit is the only valid exit.
+- If part of your task is implementable and part requires user action, do the implementable part, then take the Clarification Exit for the remainder. Do not mark the task complete.
 
 ## Deferrals Are Never Justified
 

@@ -69,8 +69,10 @@ After all agents return, you have each phase's full report (Findings table + Dec
 Perform these against the phase spec files (read each spec at most once) plus the per-phase reports you already have:
 
 ### 1. Shared File Conflicts
-- Identify files that appear in multiple phase specs (in "Files to create" or "Files to modify").
-- If two phases modify the same file in compatible ways, that is fine. If they create the same file, or modify it in contradictory ways, flag it.
+- Read each phase spec's **Files Owned** section. That is the phase's authoritative file footprint — the deduplicated union of every task's Files to create + Files to modify.
+- Take the set intersection across phase pairs. Any file appearing in more than one feature phase's **Files Owned** is a finding. (Phase 0 Dead Code Removal and the Legacy Reference Review phase are exempt — they span arbitrary files by design.)
+- If a phase spec is missing its **Files Owned** section, flag that as a `critical` finding — the phase cannot be cross-checked. Do not attempt to rebuild the footprint by scraping individual task bodies; that defeats the point of the section.
+- For each shared file: if both phases only modify it in compatible additive ways (e.g. adding two different functions), note it but classify as `info`. If they create the same file, modify the same function/region, or one's modifications depend on the other's (which the dependency graph should have caught), flag as `critical`.
 
 ### 2. Phase Dependency Respect
 - Check the dependency graph from `spec/plan.md`.
@@ -158,15 +160,16 @@ Do not proceed until you have an answer for the mechanical-approval question AND
 
 ### 4. Batch and Spawn Fix Agents
 
-Consolidate all approved fixes, grouped by spec file. For each spec file that needs edits, spawn one `claude-orchestrator:implementer` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+Consolidate all approved fixes, grouped by spec file. For each spec file that needs edits, spawn one `claude-orchestrator:fix-agent` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+
+Do NOT spawn `claude-orchestrator:implementer` for spec-file edits — that agent is built around the hybrid implementation pipeline (locks, `spec/progress.md`, hybrid state) and will create lock directories and progress entries that don't belong in a spec-review session. `claude-orchestrator:fix-agent` is the correct agent type.
 
 Each fix-agent prompt contains:
-- The spec file path to edit
-- The list of approved Mechanical edits with before/after text (verbatim from the Proposed Fix column)
-- The list of resolved Decision-Required edits (with the user's chosen option, or their custom instruction, as the edit directive)
-- A directive to make ONLY the specified edits and return a line-by-line summary of what changed
-
-Do not apply edits yourself with `Edit` — the fix agents do the work. Your job after spawning is to collect their summaries.
+- The spec file path to edit (single-file target list)
+- The list of approved Mechanical edits, each labelled `auto-fix:mechanical:{id}` with verbatim before/after text from the Proposed Fix column
+- The list of resolved Decision-Required edits, each labelled `user-decision:{id}` with the user's chosen option (or their custom free-text instruction) as the edit directive
+- No test directive (spec files don't have tests)
+- A report directive: "summarise what changed in line-by-line terms"
 
 ### 5. Final Summary
 - Mechanical fixes applied / skipped (count by phase)
@@ -195,6 +198,6 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 
 - Run the materialize script during setup (step 5).
 - Do not review specs yourself. Spawn review-spec agents for per-phase review. You do cross-phase checks, aggregation, and the user-facing decision loop.
-- You do NOT apply edits yourself. Present findings in one pass, collect all user answers in one batched `AskUserQuestion`, then spawn `claude-orchestrator:implementer` agents (one per target spec file) to apply the approved edits.
+- You do NOT apply edits yourself. Present findings in one pass, collect all user answers in one batched `AskUserQuestion`, then spawn `claude-orchestrator:fix-agent` agents (one per target spec file) to apply the approved edits.
 - Never queue a fix-agent edit for a Decision-Required item without the user picking an option (or supplying their own). "Probably option A" is not approval — skip it and report it as deferred.
-- The `claude-orchestrator:review-spec` agent type provides full review-spec instructions automatically. Do not redundantly point agents to `spec/.context/review-spec.md` if using the agent type.
+- Agent instructions are delivered via the `spec/.context/` copies produced by `materialize-context.sh`. The agent type does not bypass this — every review-spec agent reads `spec/.context/review-spec.md` as its first action, as the prompt template directs.

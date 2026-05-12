@@ -204,9 +204,9 @@ Do NOT modify the state file to work around a block. The hooks enforce correctne
 Before spawning anything, plan ALL batches for the current phase and write the state file. This is the **only time** you write to `spec/.hybrid-state.json`.
 
 From the phase spec and `spec/plan.md`:
-- Identify which waves can run in parallel (the spec marks these explicitly).
-- Group parallel waves into a single **batch**. Sequential waves each get their own batch.
-- For each batch, determine the task_groups: one entry per implementer you will spawn. Assign tasks to groups based on complexity and parallelism (`min(tasks, 6)` groups per batch).
+- Each **wave** in the spec becomes one **batch**. Waves are sequential within a phase by definition (later waves depend on earlier waves), so batches execute in wave order. Do not collapse multiple waves into one batch and do not split one wave across batches.
+- **Task_groups come from the spec, not from you.** Each wave's spec section includes a `Task Groups for Wave {N}.x` table listing `{group_id → tasks}`. Read it verbatim — those are the implementer assignments. Do NOT re-cluster tasks, do not merge groups, do not split groups, do not skip groups. The spec author chose these clusters by file locality; second-guessing them re-introduces the lock contention they were designed to avoid.
+- If a wave's spec is missing its Task Groups table, STOP. The spec is incomplete — surface it to the user as a planning failure and do not improvise groups yourself. Inventing groups silently shifts the file-locality decision from the spec author (who has the full file context) to you (who has only the task list).
 
 For each task in each task_group, re-read its spec and decide whether it **requires the user** — i.e. the spec explicitly says the user must configure, provide, verify, deploy, or otherwise take a real-world action that no agent can perform. Record those task_ids under `user_required_tasks[group]`. Groups with no user-required task get an empty list. **Do not skip this step.** `mark-verified.sh` refuses to PASS any group whose user-required tasks are unacked, and the user can only ack tasks you listed here — if you forget a user-required task, the user cannot ack it and the group will stall.
 
@@ -359,7 +359,7 @@ After all implementer Tasks return:
    git add -A
    git commit -m "Batch {batch_id} implementation complete"
    ```
-5. Clean locks:
+5. Clean locks (between-batch reset — wipes lock contents but keeps `spec/.locks/tasks/` and `spec/.locks/files/` directories in place ready for the next batch):
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/clear-locks.sh"
    ```
@@ -455,7 +455,7 @@ After all batches in a phase are verified:
 
 1. Run verification measures from `spec/plan.md` (test commands, acceptance criteria).
 2. Report final status: phases/batches/tasks completed, verification outcomes, test results.
-3. Clean up:
+3. Clean up (end-of-run — `--purge` removes the entire `spec/.locks/` tree, not just its contents):
    ```bash
    rm -f "spec/.hybrid-state.json"
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/clear-locks.sh" --purge
@@ -479,31 +479,26 @@ You are a long-running coordinator. Protect your context aggressively:
 
 ## User-Required Task Gate
 
-Tasks whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") are **hard stop gates**. There is no "deferral-first" option, no "we can revisit this", no "I'll note it and move on". The user gate is enforced by three independent mechanisms working together:
+See `references/rules.md` §**User-Required Tasks** for the full rule set — it applies to every agent. Coordinator-specific responsibilities:
 
-1. **Spec-time enumeration.** At setup (the "Plan All Batches" step above) you MUST populate `user_required_tasks[group]` with every task_id in that group whose spec requires the user. If you miss one, the user cannot ack it and the group will never PASS.
-2. **User-only ack script.** The only way the `user_acks` map gets populated is the user personally running `bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<evidence>"` in their own terminal, outside this Claude Code session. Every Claude-initiated bash call that mentions `ack-user-gate.sh` is blocked by `gate-user-ack.sh` (PreToolUse hook, registered in this skill's frontmatter). That includes direct Bash calls, `!`-prefixed commands, and background Tasks. You **cannot** ack on the user's behalf; attempting to do so fails with an exit 2 and a directive telling you to present the command to the user instead.
-3. **Server-side PASS rejection.** `mark-verified.sh` refuses to record PASS for any task_group whose `user_required_tasks[group]` list contains a task_id missing from `user_acks`. Even if the wave-verifier mistakenly reports PASS, the state file will not accept it, and the batch stays open.
+### Spec-time enumeration (your responsibility)
+
+At setup (the "Plan All Batches" step above) populate `user_required_tasks[group]` with every task_id in that group whose spec requires the user. The user cannot ack a task you didn't enumerate; if you miss one, the group will never PASS. This is your most easily-missed obligation — re-read every task's spec specifically for user-required language before writing the state file.
 
 ### Flow for a user-required task
 
-1. As soon as you know a batch contains a user-required task, present the ack command to the user via `AskUserQuestion`. The question body must include:
+1. As soon as you know a batch contains a user-required task, present the ack command to the user via `AskUserQuestion`. Include:
    - The task_id and the exact real-world action the user must perform.
-   - The verbatim command to run:
+   - The verbatim command:
      ```
-     bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<one-line evidence of what you did>"
+     bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<one-line evidence>"
      ```
-   - Explicit instructions that the user must run it in a **separate terminal** (their own shell, not a `!`-prefixed call inside this Claude Code session — that goes through the Bash tool and is blocked).
-2. Do not spawn implementers for the user-required task itself. Implementers cannot complete it; they would have to take the Clarification Exit anyway. Implementers for other tasks in the same group proceed normally, but the group cannot PASS until the ack is recorded.
-3. Wait for the user to confirm. Read `spec/.hybrid-state.json` to confirm `user_acks[<task_id>]` is now present with the expected evidence.
-4. Only then spawn the wave-verifier. `mark-verified.sh` will accept PASS for the group if and only if every user-required task has an ack entry.
+   - Explicit instructions that the user must run it in a **separate terminal** (a `!`-prefixed call inside this session goes through the Bash tool and is blocked).
+2. Do not spawn implementers for the user-required task itself — they cannot complete it and would take the Clarification Exit. Implementers for other tasks in the same group proceed normally, but the group cannot PASS until the ack is recorded.
+3. Wait for the user to confirm. Re-read `spec/.hybrid-state.json` to confirm `user_acks[<task_id>]` is present with the expected evidence.
+4. Only then spawn the wave-verifier. `mark-verified.sh` enforces the gate server-side: it will not record PASS unless every user-required task has an ack entry.
 
-### What you MUST NOT do
-
-- Do not recommend deferring a user-required task. "We can wire this up later" / "for now let's stub it" / "the user can fill this in post-deployment" are all prohibited outputs. If you find yourself drafting that recommendation, stop and present the ack command instead.
-- Do not ack on the user's behalf, even if the user tells you "just confirm it for me". The hook will block the attempt; the correct response is to hand them the command and ask them to run it.
-- Do not invent placeholder acks, write `user_acks` directly via a script you wrote, or edit `spec/.hybrid-state.json` to insert one. All of these are caught by code review, by verifier scans, and by `mark-verified.sh`'s enforcement logic — and they defeat the single mechanism that guarantees the user actually did the thing.
-- Do not advance past a user-required task while it remains unacked, no matter how long it has been waiting. It is a gate, not a timeout.
+The prohibitions (do not recommend deferral, do not ack on the user's behalf, do not edit `user_acks` directly, do not advance past an unacked gate) are listed in `references/rules.md` §**User-Required Tasks** — they bind you as much as any spawned agent.
 
 ## Error Handling
 

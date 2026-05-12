@@ -79,6 +79,30 @@ For each task, define:
 - **Tests**: exact test paths, class names, method names, and what each test asserts
 - **Acceptance criteria**: concrete, testable statements
 
+Every field above must be an enumerated list. No open-ended phrasing, no class-of-files descriptions, no "and related files." See the **Specs Are Concrete — No Implementer Discovery** section below: if you find yourself wanting to write "wherever applicable" or "find all uses of...", stop and run the discovery yourself (Grep/Glob/Read) before writing the spec entry.
+
+### 6. Declare the Phase's File Footprint
+Populate the **Files Owned** section at the top of the spec by enumerating every file that any task in this phase creates or modifies. This is the deduplicated union of every task's `Files to create` + `Files to modify`. No file in another feature phase's "Files Owned" list may appear here — if a conflict surfaces, escalate to the user; do not silently overlap. (Phase 0 and the Legacy Reference Review phase are excepted from this constraint by design.)
+
+### 7. Form Task Groups Per Wave
+For each wave, populate the **Task Groups for Wave {N}.x** table. A task_group is the set of tasks one implementer will own end-to-end. The coordinator reads these verbatim and spawns one implementer per group.
+
+Form groups by these rules, in order:
+1. **File locality binds.** Two tasks that touch the same file MUST be in the same group. Otherwise they fight over the file lock and one will block the other or take the Clarification Exit.
+2. **Hard cap: 10 files per group** (the union of every task's Files to create + Files to modify across the group). Target 4–6. If a group exceeds 10 files, split it. If splitting forces two groups to touch the same file, the phase is wrongly scoped — escalate to the user.
+3. **Complexity influences sizing within the cap.** A group of L-complexity tasks should be smaller than a group of S-complexity tasks; an agent's reading + reasoning budget is the limit, not the file count alone.
+4. **One implementer per group.** Do not propose groups that "could be split if needed" — commit to a structure.
+
+### 8. Author Mechanical-Edit Tasks With Strict Discipline
+A "mechanical edit" task is a rename, regex replacement, config-key migration, import-path fix, API-symbol swap — anything where the same shape of change is applied at multiple known locations. These tasks are highly delegate-able BUT only if you author them per the **Mechanical-Edit Task Pattern** in `spec-template.md`. That pattern is non-optional for any task you classify as mechanical:
+
+- **You enumerate every affected reference** (file:line, before-text) in the spec by running Grep/Glob now. The implementer does NOT re-search.
+- **Dry-run is compulsory.** The task's first implementation step is a dry-run that lists every intended edit; the dry-run output must match your enumerated references exactly before any real edit is applied. Mismatch → Clarification Exit.
+- **Encoding controls are mandatory.** All reads/writes UTF-8 no BOM; no silent encoding conversion; post-edit mojibake smoke check (U+FFFD, common Latin-1-as-UTF-8 sequences) is a FAIL condition; line endings preserved per file.
+- **Scripted, not hand-edited.** The task is executed via a script the implementer writes and runs (sed pipeline, small Python script, etc.) — not by repeated `Edit` calls. You specify the script approach.
+
+If you cannot enumerate the affected references — if you're tempted to write "everywhere it appears" — the task is not yet specced. Run the search yourself first, then enumerate, then write the task.
+
 ## Spec File Principle
 
 Spec files are current-state contracts. They contain ONLY what to build:
@@ -88,6 +112,26 @@ Spec files are current-state contracts. They contain ONLY what to build:
 - No "this was changed from Y to Z"
 
 If a decision changes mid-session, the spec is updated in place. The final spec reads as if the current design was always the plan.
+
+## Specs Are Concrete — No Implementer Discovery
+
+Implementers execute exactly what is specified. They do not investigate, audit, search, sample, or adjust their work in response to what they find. All discovery work belongs to the spec author — you — and must be completed BEFORE the spec is written.
+
+**Banned phrasings.** Never write tasks, files, tests, or acceptance criteria that contain:
+- "verify X exists" / "verify Y is present" / "check that Z is correct"
+- "find all cases of...", "search for all uses of...", "identify any remaining..."
+- "...and others", "...and similar", "...and any related files", "etc."
+- "audit", "review", "scan", "sweep" (when used to mean "discover what's there")
+- "if X exists, then..." / "wherever applicable" / "update as needed"
+- "ensure consistency with the rest of the codebase"
+- Open-ended file lists ("relevant files in `src/foo/`") instead of explicit paths
+- Any phrasing that requires the implementer to decide scope based on what they observe
+
+**The rule.** If a task needs discovery to define its scope, you do the discovery now (with Grep, Glob, Read) and then write the spec with the enumerated, concrete result. The spec lists exact files, exact symbols, exact lines, exact test names. An implementer reading the spec must never have to ask "which ones?" or "where?"
+
+**Legacy-reference / audit phases are not an exception.** If the plan includes a "find and remove remaining references" phase, you run those searches during spec authoring and enumerate every hit in the spec. The implementer deletes a known list — they do not re-run the search.
+
+If discovery during spec authoring reveals the scope is too large to enumerate, that is a planning problem: surface it to the user and adjust the plan. Do not paper over it with vague task descriptions.
 
 ## Output
 

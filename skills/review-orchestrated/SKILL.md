@@ -105,16 +105,18 @@ The user replies in chat with their picks (e.g. "D1: B, D2: A, D3: custom — {i
 
 ### 4. Batch and Spawn Fix Agents
 
-Consolidate all queued fixes (auto-fixes + user-resolved decisions), grouped by target file or by logically-related file cluster for fixes that span files. For each cluster, spawn one `claude-orchestrator:implementer` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+Consolidate all queued fixes (auto-fixes + user-resolved decisions), grouped by target file or by logically-related file cluster for fixes that span files. For each cluster, spawn one `claude-orchestrator:fix-agent` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+
+Do NOT spawn `claude-orchestrator:implementer` for fix work — that agent is built around the hybrid pipeline (locks, `spec/progress.md`, `spec/.hybrid-state.json`, test-baseline, mandatory recording scripts) and will pollute the review session with hybrid-state side effects. `claude-orchestrator:fix-agent` is the correct agent type for applying a pre-specified list of edits.
 
 Each fix-agent prompt contains:
-- The target file(s) to edit
-- The list of fixes to apply, each labelled with its type (auto-fix or user-decision) and the verbatim fix directive
-- A directive to make ONLY the specified edits, run any affected tests locally, and return a summary of what changed plus any tests that now fail
-- For weak-test auto-fixes: a directive to also report what the weak assertion was hiding (regression, missing coverage, broken behaviour) so it surfaces in the summary
-- For legacy/fallback-comment auto-fixes: a directive to first verify the decorated code against the spec; delete just the comment if compliant, delete code+comment if not, and fix collateral tests in either case
+- The target file(s) to edit (the fix-agent rejects any edit to a file not on this list)
+- The list of fixes to apply, each labelled `auto-fix:{rule}` or `user-decision:{id}` and accompanied by the verbatim fix directive
+- A test directive (the project's test command plus which test paths are affected) if you want tests run, otherwise omit
+- For weak-test auto-fixes: include "report what the weak assertion was hiding" in the report directive
+- For legacy/fallback-comment auto-fixes: include "verify the decorated code against the spec; delete the comment if the code is compliant, delete both code and comment if not, fix collateral tests in either case"
 
-Do not edit files yourself. Your job after spawning is to collect the summaries.
+Do not edit files yourself. Your job after spawning is to collect the fix reports.
 
 ## Verification
 

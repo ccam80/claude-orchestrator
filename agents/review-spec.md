@@ -22,7 +22,7 @@ Before doing anything else, read these files in order:
 
 ## Review Dimensions
 
-Evaluate the spec across five dimensions. For each, produce concrete findings with spec section references.
+Evaluate the spec across seven dimensions. For each, produce concrete findings with spec section references.
 
 ### 1. Plan Coverage
 
@@ -62,6 +62,23 @@ A fresh implementation agent with no project context must be able to execute eac
 - Required imports, dependencies, or setup steps are mentioned.
 - Edge cases and error handling requirements are specified where relevant.
 - The task scope is achievable in a single agent session (not unreasonably large).
+- No task contains discovery phrasing ("verify X exists", "find all cases of...", "...and others", "wherever applicable", "audit", "search", "if X exists then..."). The spec author owns discovery; an implementer must never have to decide scope based on what it observes. Discovery phrasing is `major` at minimum.
+
+### 6. Files Owned Integrity
+
+The spec must include a top-level **Files Owned** section enumerating every file the phase creates or modifies. Check:
+- The section exists. If missing → `critical` finding; the phase cannot be cross-checked against other phases without it.
+- The list equals the deduplicated union of every task's `Files to create` + `Files to modify`. Compute the union yourself and diff against the section. Extra files in `Files Owned` not used by any task → `major`. Files used by a task but absent from `Files Owned` → `major`.
+- Each entry is labelled `created` or `modified`. Inconsistencies with task bodies (e.g. listed as `modified` but a task creates it fresh) → `major`.
+
+### 7. Task Groups Validity
+
+Each wave must include a **Task Groups for Wave {N}.x** table assigning every task in the wave to exactly one task_group. Check:
+- The table exists for every wave. Missing → `critical`; the implement-hybrid coordinator stops the run if it sees a missing table.
+- Every task in the wave appears in exactly one group. Unassigned task → `critical`. Task in two groups → `critical`.
+- The 10-file cap holds: for each group, the union of every task's Files to create + Files to modify must be ≤ 10 files. Over cap → `major`.
+- File locality is honoured: if two tasks share any file in their Files-to-modify/create lists, they MUST be in the same group. Split-across-groups → `critical` (this is the lock-contention bug the cap is meant to prevent).
+- The "Files in scope" column for each group matches the actual union of its tasks' file lists. Mismatch → `minor`.
 
 ## Severity Ranking
 

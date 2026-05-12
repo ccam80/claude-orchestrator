@@ -16,23 +16,29 @@
 ## Dependency Graph
 
 ```
-Phase 0 (Dead Code Removal)         ─── runs first, alone
+Phase 0 (Dead Code Removal)                  ─── runs first, alone
 │
-Phase 1 ({Name})                     ─── after 0
-├──→ Phase 2 ({Name})     ─── parallel after 1 ──┐
-├──→ Phase 3 ({Name})     ─── parallel after 1    │
-│                                                  │
-│    Phase 4 ({Name})     ─── after 3              │
-│                                                  │
-└──→ Phase 5 ({Name})    ─── after 4 + 2 ──────────┘
+Phase 1 (shared core: src/core/ + tests)     ─── after 0; everything below depends on it
+├──→ Phase 2 (src/auth/ + tests/auth/)       ─── parallel after 1 ──┐
+├──→ Phase 3 (src/billing/ + tests/billing/) ─── parallel after 1    │
+│                                                                     │
+│    Phase 4 (src/billing/reports/ + tests)  ─── after 3              │
+│                                                                     │
+└──→ Phase 5 (cross-cutting wiring in        ─── after 4 + 2 ─────────┘
+              src/app.py + src/router.py)
 │
-Phase N (Legacy Reference Review)    ─── runs last, after all
+Phase N (Legacy Reference Review)            ─── runs last, after all
 ```
 
 Phases are numbered in execution order. Phases that can start in parallel
 after the same dependency have consecutive numbers.
 
-Phase 0 and the final phase are mandatory in every plan.
+Phase boundaries follow parallelisability + file locality: name each phase
+by the file scope it owns (e.g. `src/auth/ + tests/auth/`) rather than a
+narrative theme. The same file should appear in at most one feature phase.
+
+Phase 0 and the final phase are the only allowed themed-by-purpose phases
+and are mandatory in every plan.
 
 ---
 

@@ -55,13 +55,12 @@ Scan all created/modified files for violations. These are **automatic FAIL condi
 - An implementer completion report that describes the work as "mostly done", "minimum viable", "essential parts only", or similar scope-narrowing phrasing
 
 **User-required task deferral (automatic FAIL — no exceptions):**
-A task whose spec explicitly requires the user (e.g. "the user must configure…", "requires user to provide…", "user manually verifies…") can only be marked complete if the user has personally run `ack-user-gate.sh` for that task. The state file `spec/.hybrid-state.json` records these confirmations under `batches[].user_acks`. `mark-verified.sh` refuses to record PASS for any task_group whose `user_required_tasks[group]` list contains an unacked task, so this check is enforced server-side — but you must also FAIL the group in your report so the coordinator surfaces it. Specific patterns that constitute deferral:
-- Placeholder values standing in for user-provided input
-- Comments indicating the user should act later ("user needs to…", "to be configured by user", "replace with your…")
-- Stub implementations that assume the user will complete the action post-deployment
-- A `complete` or `partial` status in `spec/progress.md` for a task that requires user action, without a corresponding entry in `user_acks`
-- Any implementer or coordinator attempt to "represent" the user by acking on their behalf — only the user can run `ack-user-gate.sh`, which is enforced by a PreToolUse hook blocking agent-initiated invocations
-If the user action was not acked through `ack-user-gate.sh`, the task_group FAILS regardless of all other checks passing. Do not accept coordinator narration ("user told me they did it") as a substitute for the ack entry.
+See `spec/.context/rules.md` §**User-Required Tasks** for the rule set. Verifier-specific summary:
+
+- For every task in your scope, check whether its spec requires user action.
+- If yes, the only valid completion evidence is an entry in `batches[].user_acks[<task_id>]` in `spec/.hybrid-state.json`. `mark-verified.sh` enforces this server-side (it rejects PASS for any group with unacked user-required tasks), but you must ALSO FAIL the group in your report so the coordinator surfaces the issue.
+- FAIL-on-sight deferral patterns: placeholder values for user-provided input; comments like "user needs to…", "to be configured by user", "replace with your…"; stub implementations assuming the user will act post-deployment; `complete`/`partial` status in `spec/progress.md` for a user-required task without the matching `user_acks` entry; any indication an agent acked on the user's behalf.
+- Never accept coordinator narration ("user told me they did it") as a substitute for the `user_acks` entry.
 
 **Legacy and fallback patterns (these are dead-code problems, not comment problems):**
 - Backwards-compatibility shims, re-exports, deprecated wrappers

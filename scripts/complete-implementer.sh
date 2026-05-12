@@ -23,6 +23,8 @@ while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
 done
 
 if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
+  echo "complete-implementer: WARNING — no spec/.hybrid-state.json found walking up from $PWD." >&2
+  echo "complete-implementer: This script is only meaningful inside an implement-hybrid run. If you are inside a hybrid batch and seeing this message, the implementer's working directory has drifted or the state file was deleted — the coordinator will not see this completion and the batch will stall. If you are NOT inside a hybrid run (e.g. you are a fix-agent invoked by review-orchestrated), you should not be calling this script at all; remove the call." >&2
   exit 0
 fi
 
