@@ -9,6 +9,7 @@ You receive a review assignment containing:
 - Phase number and name to review
 - Phase spec file path
 - Plan file path
+- Manifest file path (`spec/manifest.json`)
 - Paths to shared context files in `spec/.context/`
 
 ## Setup
@@ -18,7 +19,8 @@ Before doing anything else, read these files in order:
 2. `spec/.context/rules.md` — implementation rules that specs must support
 3. `spec/plan.md` — the full plan (for plan coverage checks)
 4. The phase spec file identified in your assignment
-5. `CLAUDE.md` — project-specific rules and conventions
+5. `spec/manifest.json` — the job-control manifest (for Task Groups Validity)
+6. `CLAUDE.md` — project-specific rules and conventions
 
 ## Review Dimensions
 
@@ -73,12 +75,13 @@ The spec must include a top-level **Files Owned** section enumerating every file
 
 ### 7. Task Groups Validity
 
-Each wave must include a **Task Groups for Wave {N}.x** table assigning every task in the wave to exactly one task_group. Check:
-- The table exists for every wave. Missing → `critical`; the implement-hybrid coordinator stops the run if it sees a missing table.
-- Every task in the wave appears in exactly one group. Unassigned task → `critical`. Task in two groups → `critical`.
-- The 10-file cap holds: for each group, the union of every task's Files to create + Files to modify must be ≤ 10 files. Over cap → `major`.
-- File locality is honoured: if two tasks share any file in their Files-to-modify/create lists, they MUST be in the same group. Split-across-groups → `critical` (this is the lock-contention bug the cap is meant to prevent).
-- The "Files in scope" column for each group matches the actual union of its tasks' file lists. Mismatch → `minor`.
+Task_groups live in `spec/manifest.json`, not in the phase spec. Read this phase's `phases[]` entry in the manifest and validate it against the phase spec. Check:
+- The phase has an entry in the manifest, and every wave in it has a non-empty `task_groups` array. Missing entry, or an empty `task_groups` for any wave → `critical`; the implement-hybrid coordinator stops the run.
+- Every task in every wave of the phase spec appears in exactly one manifest task_group. Unassigned task → `critical`. Task in two groups → `critical`. A manifest task ID with no matching task in the phase spec → `critical`.
+- Each task in the manifest carries a `complexity` of `S`, `M`, or `L`. Missing or invalid value → `major`.
+- The 10-file cap holds: for each group, take the union of every task's `Files to create` + `Files to modify` (from the phase spec) — it must be ≤ 10 files. Over cap → `major`.
+- File locality is honoured: if two tasks share any file in their Files-to-create/modify lists (per the phase spec), they MUST be in the same manifest group. Split-across-groups → `critical` (this is the lock-contention bug the cap is meant to prevent).
+- `user_required_tasks` for each group lists exactly the task IDs in that group whose phase-spec text explicitly requires a real-world user action. A user-required task missing from the list → `critical` (the coordinator's gate can never be acked for it). A task wrongly listed as user-required → `major`.
 
 ## Severity Ranking
 

@@ -104,6 +104,7 @@ The state file `spec/.hybrid-state.json` combines counters with per-task_group s
   "batches": [
     {
       "id": "batch-1",
+      "phase": 1,
       "task_groups": ["1.1", "1.2", "1.3"],
       "tasks": [["T2.1", "T2.3"], ["T1.2"], ["T3.3", "T2.2"]],
       "spawned": 0,
@@ -130,7 +131,7 @@ The state file `spec/.hybrid-state.json` combines counters with per-task_group s
 }
 ```
 
-**Fields you write (once, at setup):** `id`, `task_groups`, `tasks`, all seven counters initialized to 0, `group_status` with every task_group set to `"pending"`, `user_required_tasks` mapping each task_group to the list of task_ids in that group whose spec explicitly requires a user action (empty list if none), and `user_acks` initialized to `{}`.
+**Fields you write (once, at setup, for every batch of every phase in scope):** `id`, `phase`, `task_groups`, `tasks`, all seven counters initialized to 0, `group_status` with every task_group set to `"pending"`, `user_required_tasks` mapping each task_group to the list of task_ids in that group whose spec explicitly requires a user action (empty list if none), and `user_acks` initialized to `{}`.
 
 **Fields written after setup (do not edit them yourself):**
 - `spawned` — written by `gate-implementer.sh` (PreToolUse hook, automatic), and adjusted by `i-fixed-it.sh` / `reopen-implementer-slot.sh` under the escape-hatch paths.
@@ -184,39 +185,40 @@ Do NOT modify the state file to work around a block. The hooks enforce correctne
 ## Setup
 
 1. Determine the project root directory (current working directory).
-2. Read `spec/plan.md` — phase dependency graph, wave structure, task complexities. Identify which waves can run in parallel.
-3. If `$ARGUMENTS` specifies a phase, limit execution to that phase. Otherwise execute all incomplete phases in dependency order.
+2. Read `spec/manifest.json` — the job-control artifact. It contains, in execution order, every phase, its waves, the task_groups per wave, each task's complexity, each group's user-required task IDs, the `test_command`, and the final `verification` checks. This is the **only** input you need to plan the run. Do not read `spec/plan.md` (a planning document, not a runtime input) and do not read the phase spec files yourself — those are read by the implementers and verifiers you spawn, not by you. If `spec/manifest.json` is missing, surface it to the user as a planning failure (the phases have not been specced) and stop.
+3. If `$ARGUMENTS` specifies a phase, limit execution to that phase's batches. Otherwise execute all incomplete phases in the manifest's order.
 4. Check for recovery state:
    - If `spec/.hybrid-state.json` exists, read it — resume from where counters left off.
    - Otherwise read `spec/progress.md` to determine what's already complete.
-5. Read the phase spec file for the **first incomplete phase only**.
-6. Materialize shared context files:
+5. Materialize shared context files:
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" hybrid "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
    ```
-7. Initialize lock directories:
+6. Initialize lock directories:
    ```bash
    mkdir -p "spec/.locks/tasks" "spec/.locks/files"
    ```
 
 ## Plan All Batches (Step 1 — Write State Once)
 
-Before spawning anything, plan ALL batches for the current phase and write the state file. This is the **only time** you write to `spec/.hybrid-state.json`.
+Before spawning anything, translate `spec/manifest.json` into the batch plan and write the state file. This is the **only time** you write to `spec/.hybrid-state.json`. The state file is complete after setup: every batch of every phase exists in it from the start. You never add a phase's batches later.
 
-From the phase spec and `spec/plan.md`:
-- Each **wave** in the spec becomes one **batch**. Waves are sequential within a phase by definition (later waves depend on earlier waves), so batches execute in wave order. Do not collapse multiple waves into one batch and do not split one wave across batches.
-- **Task_groups come from the spec, not from you.** Each wave's spec section includes a `Task Groups for Wave {N}.x` table listing `{group_id → tasks}`. Read it verbatim — those are the implementer assignments. Do NOT re-cluster tasks, do not merge groups, do not split groups, do not skip groups. The spec author chose these clusters by file locality; second-guessing them re-introduces the lock contention they were designed to avoid.
-- If a wave's spec is missing its Task Groups table, STOP. The spec is incomplete — surface it to the user as a planning failure and do not improvise groups yourself. Inventing groups silently shifts the file-locality decision from the spec author (who has the full file context) to you (who has only the task list).
+The manifest is the contract — you copy from it, you do not author structure:
+- Each **wave** in the manifest becomes one **batch**. The manifest's `phases` array is in execution order and each phase's `waves` array is in execution order — flatten phases → waves into the `batches` array in exactly that order. Number batch ids globally (`batch-1`, `batch-2`, … `batch-N`). Do not collapse multiple waves into one batch and do not split one wave across batches.
+- Tag each batch with its phase number via the `phase` field. The phase's spec file path (`spec_file`) and each task's `complexity` stay in the manifest — re-read the manifest for them whenever you assemble a spawn prompt; it is immutable for the duration of the run.
+- **Task_groups come from the manifest, not from you.** Each wave's `task_groups` array is the implementer assignment. Copy each `group_id` and its `tasks` verbatim. Do NOT re-cluster tasks, merge groups, split groups, or skip groups — the spec author chose these clusters by file locality, and second-guessing them re-introduces the lock contention they were designed to avoid.
+- `user_required_tasks` is already enumerated per group in the manifest. Copy it verbatim into each batch's `user_required_tasks` map — do not re-derive it and do not drop entries. `mark-verified.sh` refuses to PASS any group whose user-required tasks are unacked, and the user can only ack tasks listed here.
 
-For each task in each task_group, re-read its spec and decide whether it **requires the user** — i.e. the spec explicitly says the user must configure, provide, verify, deploy, or otherwise take a real-world action that no agent can perform. Record those task_ids under `user_required_tasks[group]`. Groups with no user-required task get an empty list. **Do not skip this step.** `mark-verified.sh` refuses to PASS any group whose user-required tasks are unacked, and the user can only ack tasks you listed here — if you forget a user-required task, the user cannot ack it and the group will stall.
+If `spec/manifest.json` is missing, has an empty `phases` array, or any wave has an empty `task_groups` array, STOP and surface it to the user as a planning failure. Do not improvise groups yourself.
 
-Write the complete state file:
+Write the complete state file in one pass. The example below spans two phases — `batch-1` is a wave of phase 1, `batch-2` is a wave of phase 2 — to show that every phase's batches are present from the start:
 
 ```json
 {
   "batches": [
     {
       "id": "batch-1",
+      "phase": 1,
       "task_groups": ["1.1", "1.2"],
       "tasks": [["T1.1a", "T1.1b"], ["T1.2a"]],
       "spawned": 0,
@@ -238,6 +240,7 @@ Write the complete state file:
     },
     {
       "id": "batch-2",
+      "phase": 2,
       "task_groups": ["2.1"],
       "tasks": [["T2.1a", "T2.1b"]],
       "spawned": 0,
@@ -260,7 +263,7 @@ Write the complete state file:
 }
 ```
 
-**After this write, do not modify the state file again except via the recovery scripts.** Normal counter updates happen through in-band scripts the subagents invoke themselves; `dead_implementers` / `dead_verifiers` are written by the matching recovery scripts when you invoke them under the dead-subagent fallback.
+**After this write, do not modify the state file again except via the recovery scripts. There is no per-phase write step — all phases are in the file now.** Normal counter updates happen through in-band scripts the subagents invoke themselves; `dead_implementers` / `dead_verifiers` are written by the matching recovery scripts when you invoke them under the dead-subagent fallback.
 
 ## Test Baseline
 
@@ -276,7 +279,7 @@ Use this prompt:
 ```markdown
 # Test Baseline Capture
 
-1. Read `CLAUDE.md` and `spec/plan.md` to find the project's test command.
+1. The test command is `{test_command}` (filled in by the coordinator from `spec/manifest.json`).
 2. Run the full test suite.
 3. Write the results to `spec/test-baseline.md` in this format:
 
@@ -300,7 +303,7 @@ Wait for the baseline Task to complete via `TaskOutput(task_id, block=true)`.
 
 ## Batch Execution
 
-Execute batches in order. The hooks enforce: you cannot start batch N+1 until every task_group in batch N has `group_status == "passed"`.
+Execute batches in order. The hooks enforce: you cannot start batch N+1 until every task_group in batch N has `group_status == "passed"`. Batches span all phases — `batch.phase` is the batch's phase number; look that phase up in `spec/manifest.json` for its `spec_file`, which the implementer and verifier prompts must reference for that batch.
 
 ### For Each Batch
 
@@ -395,12 +398,10 @@ Use this prompt template (one filled-in copy per verifier):
 - **Phase spec file**: spec/phase-{n}-{name}.md
 - **Your assigned chunk (verify ONLY these task_groups)**: {chunk_task_group_list}  ← max 4
 - **Tasks per group**: {tasks_per_group restricted to your chunk}
-- **Test Command**" {test command from CLAUDE.md including usage hints if they exist}
-
 Verify ONLY the task_groups listed above. Other verifiers are running concurrently on other chunks of the same batch. Do NOT emit a verdict for any task_group not in your chunk — duplicates and already-passed entries are rejected server-side and re-verifying is a counter-corruption bug.
 
 ## Test Command
-{test_command from CLAUDE.md or spec/plan.md}
+{test_command from spec/manifest.json}
 
 ## Context Files
 Read these files before doing anything else:
@@ -449,11 +450,11 @@ After all batches in a phase are verified:
    - **All verified**: yes
    ```
 
-2. Continue to the next phase — read its spec, plan batches, write state entries, execute.
+2. Continue to the next phase's batches. They are **already in `spec/.hybrid-state.json`** — you wrote them at setup. Do not plan batches or write state entries again; just resume Batch Execution at the first batch whose `group_status` still has a non-`"passed"` entry. Each batch's `phase` field maps to a `spec_file` in `spec/manifest.json` for the spawn prompts.
 
 ### After All Phases
 
-1. Run verification measures from `spec/plan.md` (test commands, acceptance criteria).
+1. Run the `verification` checks from `spec/manifest.json` (the final acceptance criteria) and the `test_command`.
 2. Report final status: phases/batches/tasks completed, verification outcomes, test results.
 3. Clean up (end-of-run — `--purge` removes the entire `spec/.locks/` tree, not just its contents):
    ```bash
@@ -469,7 +470,7 @@ You are a long-running coordinator. Protect your context aggressively:
 - **Use `TaskOutput(block=true)` only.** Never poll.
 - **Spawn-then-wait**: spawn multiple background Tasks in one message, then `TaskOutput` each.
 - **Never read full git diffs.** Use `git diff --shortstat` if needed.
-- **Read phase spec files once per phase**, not per batch.
+- **Read `spec/manifest.json` once at setup** to plan all batches. It is small and immutable for the run — re-read it freely for static lookups (`spec_file`, `complexity`, `test_command`) without cost concern. Never read `spec/plan.md` or the phase spec files yourself; the agents you spawn read the phase specs.
 - **State file enables recovery.** If context compresses, re-read `spec/.hybrid-state.json`. The combination of counters and `group_status` tells you exactly where you are on the active batch (first batch whose `group_status` has any entry that is not `"passed"`):
   - `spawned < len(task_groups) + verifications_failed + stops_for_clarification + dead_implementers` → room to spawn more implementers (first-pass work, dead-agent retries, clarification retries, or fix retries — no verification gate blocks this).
   - `completed + stops_for_clarification + dead_implementers < spawned` → still waiting for implementers to finish (normally, via clarification, or to be declared dead). Mark dead and respawn until the batch fills out.
@@ -518,7 +519,7 @@ This project runs on Windows with Git Bash. All bash commands MUST:
 
 ## Important
 
-- Plan all batches and write the state file ONCE during setup. After that, never edit the state file by hand — all updates happen through the in-band scripts and the dead-subagent recovery scripts.
+- Plan all batches for **every phase in scope** and write the state file ONCE during setup. Phases are never added incrementally — the state file contains every batch of every phase from the start. After that write, never edit the state file by hand — all updates happen through the in-band scripts and the dead-subagent recovery scripts.
 - Do not implement tasks yourself. Your job is to coordinate.
 - Do not verify code yourself. Spawn the wave-verifier agent.
 - The `claude-orchestrator:implementer` agent type loads its instructions automatically.

@@ -7,33 +7,20 @@
 
 Enumerate every file this phase creates or modifies. This is the phase's
 authoritative file footprint, used by review-spec for cross-phase conflict
-detection and by implement-hybrid for task_group formation. The same file
-must not appear in another feature phase's "Files Owned" list.
+detection and by plan-spec to form task_groups. The same file must not appear
+in another feature phase's "Files Owned" list.
 
 - `path/to/file_a.py` — created
 - `path/to/file_b.py` — modified
 - `tests/test_file_a.py` — created
 - `tests/test_file_b.py` — modified
 
+> **Task groups are not declared here.** They live in `spec/manifest.json`,
+> written by plan-spec (step 7 — Form Task Groups Per Wave; step 9 — Write the
+> Manifest). The phase spec carries task *content* only; the manifest carries
+> the implementer assignment structure.
+
 ## Wave {N}.1: {Description}
-
-### Task Groups for Wave {N}.1
-
-Each task_group is one implementer's assignment. The implementer reads only
-the tasks in its group and owns those file edits end-to-end. Form groups by
-file locality: tasks that touch the same file MUST be in the same group, or
-they will fight over the file lock and the verifier verdicts will not align
-with what the agent actually produced.
-
-**Hard cap: 10 files per task_group** (union of every task's Files to create
-+ Files to modify in the group). Target 4–6 in practice. If a group exceeds
-10 files, split it; if splitting forces two groups to touch the same file,
-the phase is wrongly scoped — go back to the plan.
-
-| Group ID | Tasks | Files in scope (union) |
-|----------|-------|------------------------|
-| {N}.1.a | {N}.1.1, {N}.1.2 | `path/to/file_a.py`, `tests/test_file_a.py` |
-| {N}.1.b | {N}.1.3 | `path/to/file_b.py`, `tests/test_file_b.py` |
 
 ### Task {N}.1.1: {Title}
 - **Description**: {What to build}
@@ -61,12 +48,6 @@ the phase is wrongly scoped — go back to the plan.
   - All tests pass
 
 ## Wave {N}.2: {Description}
-
-### Task Groups for Wave {N}.2
-
-| Group ID | Tasks | Files in scope (union) |
-|----------|-------|------------------------|
-| {N}.2.a | {N}.2.1 | `path/to/file.py` |
 
 ### Task {N}.2.1: {Title}
 - **Description**: {What to build}

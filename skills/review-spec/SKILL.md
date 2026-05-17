@@ -14,13 +14,14 @@ You are the spec review coordinator. You spawn review-spec agents per phase, con
 1. Determine the project root directory (current working directory).
 2. Read `spec/plan.md` to understand the full plan — phases, dependencies, tasks per phase.
 3. Read all phase spec files in `spec/` (files matching `spec/phase-*.md`).
-4. Read the project's `CLAUDE.md` for project-specific rules.
-5. Materialize shared context files for agents by running:
+4. Read `spec/manifest.json` — the job-control artifact `implement-hybrid` consumes (task_groups, per-task complexity, user-required flags, `test_command`, `verification`). Its schema is in `${CLAUDE_PLUGIN_ROOT}/skills/plan-spec/references/manifest-schema.md`.
+5. Read the project's `CLAUDE.md` for project-specific rules.
+6. Materialize shared context files for agents by running:
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" review-spec "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
    ```
    This copies `rules.md` and `review-spec.md` to `spec/.context/`.
-6. If `$ARGUMENTS` specifies phase(s), limit review to those phases. Otherwise review all phases.
+7. If `$ARGUMENTS` specifies phase(s), limit review to those phases. Otherwise review all phases.
 
 ## Per-Phase Review
 
@@ -45,6 +46,7 @@ Use this prompt template for each agent:
 ## Review Scope: Phase {n} — {phase_name}
 - **Phase spec file**: spec/phase-{n}-{name}.md
 - **Plan file**: spec/plan.md
+- **Manifest file**: spec/manifest.json
 
 ## Report Path
 Write your full report to: `spec/reviews/spec-phase-{n}.md`
@@ -55,6 +57,7 @@ Read these files before doing anything else:
 - `spec/.context/rules.md` — implementation rules that specs must support
 - `spec/plan.md` — full plan (for plan coverage checks)
 - `spec/phase-{n}-{name}.md` — the phase spec to review
+- `spec/manifest.json` — the job-control manifest (for Task Groups Validity — your phase's slice)
 - `CLAUDE.md` — project-specific rules and conventions
 ```
 
@@ -86,6 +89,14 @@ Perform these against the phase spec files (read each spec at most once) plus th
 ### 4. Plan Verification Achievability
 - The plan's verification measures must be satisfied by the combined spec contents.
 - Flag any verification measure that no spec task addresses.
+
+### 5. Manifest Consistency
+`spec/manifest.json` is the job-control artifact `implement-hybrid` consumes; it must agree with the phase specs. Check against the schema in `${CLAUDE_PLUGIN_ROOT}/skills/plan-spec/references/manifest-schema.md`:
+- The manifest exists. Missing → `critical` (implementation cannot run).
+- Every phase spec file in `spec/` has a `phases[]` entry, and every `phases[]` entry's `spec_file` resolves to a real file. Mismatch → `critical`.
+- Every task ID in the manifest exists as a task in the named `spec_file`; every task in each phase spec appears in exactly one manifest task_group. An unassigned task, a task in two groups, or a manifest task ID with no spec task → `critical`.
+- Every `task_groups[].tasks[].complexity` is `S`, `M`, or `L`. Every ID in `user_required_tasks[group]` is one of that group's task IDs, and the manifest's user-required tasks match the user-required language in the phase spec. Mismatch → `major`.
+- `test_command` is non-empty; `verification` covers the plan's verification measures. Empty `test_command` → `major`.
 
 Classify every cross-phase finding as Mechanical or Decision-Required using the same definitions the per-phase agents use (see `agents/review-spec.md`). Most cross-phase findings will be Decision-Required (which phase owns the duplicate task, how to resolve a file conflict, etc.).
 

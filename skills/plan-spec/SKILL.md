@@ -18,6 +18,7 @@ You are producing a detailed implementation specification for a single phase fro
 5. Read the project's `CLAUDE.md` for project-specific conventions.
 6. Read relevant source files to understand the existing codebase.
 7. Read the spec template from `${SKILL_DIR}/references/spec-template.md`.
+8. Read the manifest schema from `${SKILL_DIR}/references/manifest-schema.md`. You are the sole writer of `spec/manifest.json` — the job-control artifact `implement-hybrid` consumes.
 
 ## Author Authority
 
@@ -85,7 +86,7 @@ Every field above must be an enumerated list. No open-ended phrasing, no class-o
 Populate the **Files Owned** section at the top of the spec by enumerating every file that any task in this phase creates or modifies. This is the deduplicated union of every task's `Files to create` + `Files to modify`. No file in another feature phase's "Files Owned" list may appear here — if a conflict surfaces, escalate to the user; do not silently overlap. (Phase 0 and the Legacy Reference Review phase are excepted from this constraint by design.)
 
 ### 7. Form Task Groups Per Wave
-For each wave, populate the **Task Groups for Wave {N}.x** table. A task_group is the set of tasks one implementer will own end-to-end. The coordinator reads these verbatim and spawns one implementer per group.
+For each wave, form **task_groups** and record them in `spec/manifest.json` (see step 9 — Write the Manifest). A task_group is the set of tasks one implementer will own end-to-end. The coordinator reads these from the manifest verbatim and spawns one implementer per group. Task_groups live ONLY in the manifest — do not write a Task Groups table into the phase spec file.
 
 Form groups by these rules, in order:
 1. **File locality binds.** Two tasks that touch the same file MUST be in the same group. Otherwise they fight over the file lock and one will block the other or take the Clarification Exit.
@@ -102,6 +103,15 @@ A "mechanical edit" task is a rename, regex replacement, config-key migration, i
 - **Scripted, not hand-edited.** The task is executed via a script the implementer writes and runs (sed pipeline, small Python script, etc.) — not by repeated `Edit` calls. You specify the script approach.
 
 If you cannot enumerate the affected references — if you're tempted to write "everywhere it appears" — the task is not yet specced. Run the search yourself first, then enumerate, then write the task.
+
+### 9. Write the Manifest
+After the phase spec is settled, record this phase's slice in `spec/manifest.json` following `${SKILL_DIR}/references/manifest-schema.md`. The manifest is the job-control artifact `implement-hybrid` consumes — task_groups have no other home.
+
+- **Create-if-absent.** If `spec/manifest.json` does not exist, create it with `test_command` (from the project `CLAUDE.md`), `verification` (the final acceptance checks from `spec/plan.md`'s Verification section), and an empty `phases` array.
+- **Rewrite this phase's slice.** Read the existing manifest, replace this phase's entry (or append it if new), and write the whole file back. Keep `phases` ordered by phase number; keep `waves` in execution order. Never hand-edit another phase's slice.
+- **Per phase**, record `phase`, `name`, `spec_file`, and `waves`. Per wave, record every task_group from step 7 as `{group_id, tasks, user_required_tasks}`. Each task carries its `id` and `complexity` (`S`/`M`/`L`, from `spec/plan.md`).
+- **`user_required_tasks`.** For each task_group, list the task IDs whose spec explicitly requires a real-world user action (the user must configure, provide, verify, deploy, or otherwise act where no agent can). Empty list if none. `implement-hybrid`'s user-required gate is seeded directly from this field — a task you omit here cannot be acked, so the group would stall. Enumerate carefully.
+- If a spec decision changed the phase/wave/task structure, the manifest slice you write must match the final spec — they are checked for consistency by `review-spec`.
 
 ## Spec File Principle
 
@@ -135,15 +145,15 @@ If discovery during spec authoring reveals the scope is too large to enumerate, 
 
 ## Output
 
-After all tasks are specced, present the complete spec for user review. Then write the approved spec to:
+After all tasks are specced, present the complete spec for user review. Then write two files:
 
-```
-spec/phase-{n}-{name}.md
-```
+1. The approved phase spec to:
+   ```
+   spec/phase-{n}-{name}.md
+   ```
+   Where `{n}` is the phase number and `{name}` is the phase name in kebab-case (lowercase, hyphens for spaces). Use the format from `${SKILL_DIR}/references/spec-template.md`.
 
-Where `{n}` is the phase number and `{name}` is the phase name in kebab-case (lowercase, hyphens for spaces).
-
-Use the format from `${SKILL_DIR}/references/spec-template.md`.
+2. This phase's slice of `spec/manifest.json` (step 9 — Write the Manifest), following `${SKILL_DIR}/references/manifest-schema.md`.
 
 ## Shell Safety (Windows)
 
