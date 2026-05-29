@@ -1,214 +1,122 @@
 ---
 name: review-spec
-description: Review phase specs for quality, consistency, and implementability before implementation. Spawns parallel review agents per phase, performs cross-phase checks, and presents actionable findings.
+description: Review phase specs for quality, consistency, and implementability before implementation. Drives a workflow that fans out one reviewer per phase and runs deterministic cross-phase checks in JS, then applies approved fixes via a workflow.
 argument-hint: <phase number(s), or blank for all>
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskOutput, AskUserQuestion]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Workflow]
 ---
 
 # Review Spec
 
-You are the spec review coordinator. You spawn review-spec agents per phase, consume their full reports directly from Task output, perform cross-phase consistency checks, and present a single consolidated set of findings split into Mechanical fixes and Decision-Required items. You are also the interface and the fixer — you apply Mechanical fixes (with user approval) and surface Decision-Required items with options for the user to choose between.
+You are the spec-review coordinator and human gateway. A workflow fans out one review-spec
+agent per phase, runs the deterministic cross-phase checks in plain JS (tier computation,
+`depends_on` integrity, sibling file-disjointness, complexity/user-required validity), and
+runs a single semantic cross-phase agent for the two checks that need judgement (duplicate
+work, dependency compatibility). You present the consolidated findings, collect approvals
+and decisions in one batch, then drive a fix workflow.
 
 ## Setup
 
-1. Determine the project root directory (current working directory).
-2. Read `spec/plan.md` to understand the full plan — phases, dependencies, tasks per phase.
-3. Read all phase spec files in `spec/` (files matching `spec/phase-*.md`).
-4. Read `spec/manifest.json` — the job-control artifact `implement-hybrid` consumes (task_groups, per-task complexity, user-required flags, `test_command`, `verification`). Its schema is in `${CLAUDE_PLUGIN_ROOT}/skills/plan-spec/references/manifest-schema.md`.
-5. Read the project's `CLAUDE.md` for project-specific rules.
-6. Materialize shared context files for agents by running:
-   ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/materialize-context.sh" review-spec "${CLAUDE_PLUGIN_ROOT}" "{project_root}"
-   ```
-   This copies `rules.md` and `review-spec.md` to `spec/.context/`.
-7. If `$ARGUMENTS` specifies phase(s), limit review to those phases. Otherwise review all phases.
+1. Determine the project root and resolve the plugin root (`${CLAUDE_PLUGIN_ROOT}`).
+2. Read `spec/manifest.json` and `spec/plan.md` enough to list the phases in scope (number,
+   name, `spec_file`). If `$ARGUMENTS` names phase(s), limit to those; else all phases.
 
-## Per-Phase Review
+## Review + Cross-Phase
 
-### Spawn Review Agents
+Invoke the workflow, passing the parsed manifest so the JS checks have their data:
 
-For each phase in scope, spawn one review-spec agent as a background Task:
-
-- **subagent_type**: `claude-orchestrator:review-spec`
-- **model**: `sonnet`
-- **run_in_background**: `true`
-- **description**: `"Review spec phase {n}"`
-
-Use this prompt template for each agent:
-
-```markdown
-# Spec Review Assignment
-
-## Project
-- **Root**: {project_dir}
-- **Spec Directory**: {project_dir}/spec
-
-## Review Scope: Phase {n} — {phase_name}
-- **Phase spec file**: spec/phase-{n}-{name}.md
-- **Plan file**: spec/plan.md
-- **Manifest file**: spec/manifest.json
-
-## Report Path
-Write your full report to: `spec/reviews/spec-phase-{n}.md`
-
-## Context Files
-Read these files before doing anything else:
-- `spec/.context/review-spec.md` — your agent instructions
-- `spec/.context/rules.md` — implementation rules that specs must support
-- `spec/plan.md` — full plan (for plan coverage checks)
-- `spec/phase-{n}-{name}.md` — the phase spec to review
-- `spec/manifest.json` — the job-control manifest (for Task Groups Validity — your phase's slice)
-- `CLAUDE.md` — project-specific rules and conventions
+```
+Workflow({
+  scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/review-spec.mjs",
+  args: { project_dir, plugin_root, manifest: <parsed spec/manifest.json>, phases: [{ phase, name, spec_file }] }
+})
 ```
 
-Spawn all review agents **in a single message**. Then call `TaskOutput(task_id, block=true)` for each in a follow-up message.
+It returns:
 
-### Collect Results
-
-After all agents return, you have each phase's full report (Findings table + Decision-Required items) in your context already — the agent returned the full report as its Task output. Do NOT re-read the report files from disk; that is the context burn we are eliminating.
-
-## Cross-Phase Checks
-
-Perform these against the phase spec files (read each spec at most once) plus the per-phase reports you already have:
-
-### 1. Shared File Conflicts
-- Read each phase spec's **Files Owned** section. That is the phase's authoritative file footprint — the deduplicated union of every task's Files to create + Files to modify.
-- Take the set intersection across phase pairs. Any file appearing in more than one feature phase's **Files Owned** is a finding. (Phase 0 Dead Code Removal and the Legacy Reference Review phase are exempt — they span arbitrary files by design.)
-- If a phase spec is missing its **Files Owned** section, flag that as a `critical` finding — the phase cannot be cross-checked. Do not attempt to rebuild the footprint by scraping individual task bodies; that defeats the point of the section.
-- For each shared file: if both phases only modify it in compatible additive ways (e.g. adding two different functions), note it but classify as `info`. If they create the same file, modify the same function/region, or one's modifications depend on the other's (which the dependency graph should have caught), flag as `critical`.
-
-### 2. Phase Dependency Respect
-- Check the dependency graph from `spec/plan.md`.
-- No phase spec may reference outputs (files, functions, APIs) from a later phase.
-- Dependent phases' specs must be compatible with what their prerequisite phases produce.
-
-### 3. No Duplicate Tasks
-- No task should appear in multiple phase specs.
-- No two tasks across phases should describe the same work with different IDs.
-
-### 4. Plan Verification Achievability
-- The plan's verification measures must be satisfied by the combined spec contents.
-- Flag any verification measure that no spec task addresses.
-
-### 5. Manifest Consistency
-`spec/manifest.json` is the job-control artifact `implement-hybrid` consumes; it must agree with the phase specs. Check against the schema in `${CLAUDE_PLUGIN_ROOT}/skills/plan-spec/references/manifest-schema.md`:
-- The manifest exists. Missing → `critical` (implementation cannot run).
-- Every phase spec file in `spec/` has a `phases[]` entry, and every `phases[]` entry's `spec_file` resolves to a real file. Mismatch → `critical`.
-- Every task ID in the manifest exists as a task in the named `spec_file`; every task in each phase spec appears in exactly one manifest task_group. An unassigned task, a task in two groups, or a manifest task ID with no spec task → `critical`.
-- Every `task_groups[].tasks[].complexity` is `S`, `M`, or `L`. Every ID in `user_required_tasks[group]` is one of that group's task IDs, and the manifest's user-required tasks match the user-required language in the phase spec. Mismatch → `major`.
-- `test_command` is non-empty; `verification` covers the plan's verification measures. Empty `test_command` → `major`.
-
-Classify every cross-phase finding as Mechanical or Decision-Required using the same definitions the per-phase agents use (see `agents/review-spec.md`). Most cross-phase findings will be Decision-Required (which phase owns the duplicate task, how to resolve a file conflict, etc.).
-
-## Aggregate and Cross-Check
-
-Before writing the combined report:
-
-1. **Deduplicate**: if two per-phase reports flag the same underlying issue (e.g., both Phase 2 and Phase 3 mention they both create `src/auth.py`), merge them into one finding.
-2. **Promote severity on conflict**: if a per-phase finding is `minor` in isolation but conflicts with another phase's spec, promote it to at least `major`.
-3. **Re-classify on conflict**: a Mechanical fix in one phase may become Decision-Required if the cross-phase view introduces ambiguity (e.g., "rename to plan's ID" is mechanical until two phases both want that ID).
-4. **Stable IDs**: rewrite finding IDs as `P{phase}-M{n}` for mechanical and `P{phase}-D{n}` for decision-required; cross-phase findings get `X-M{n}` / `X-D{n}`.
-
-## Combined Report
-
-Write to `spec/reviews/spec-review-combined.md`:
-
-```markdown
-# Spec Review: Combined Report
-
-## Overall Verdict: ready | needs-revision
-
-## Per-Phase Verdicts
-| Phase | Verdict | critical | major | minor | info |
-|-------|---------|----------|-------|-------|------|
-| {n} — {name} | ready/needs-revision | {n} | {n} | {n} | {n} |
-
-## Mechanical Fixes (apply with user approval)
-| ID | Severity | Phase | Location | Problem | Proposed Fix |
-|----|----------|-------|----------|---------|--------------|
-| P2-M1 | major | 2 | phase-2 §Task 4 | … | … |
-| X-M1  | minor | cross | phase-2, phase-3 | … | … |
-
-## Decision-Required Items (user must choose)
-### P2-D1 — {short title} ({severity})
-- **Phase / Location**: …
-- **Problem**: …
-- **Why decision-required**: …
-- **Options**: A / B / (C) with pros & cons (verbatim from per-phase report, edited only for cross-phase context)
-
-### X-D1 — {short title} ({severity})
-…
+```jsonc
+{
+  perPhase:  [{ phase, verdict, findings: [{ id, severity, classification, location, problem, proposed_fix, options }], files_owned }],
+  crossPhase:[{ id, severity, classification, location, problem, proposed_fix, options }],   // X-* ids
+  tiers:     { "0": [0], "1": [1], "2": [2,3] }
+}
 ```
 
-## Present Findings to User
+Each review-spec agent also wrote a full report to `spec/reviews/spec-phase-{n}.md`.
 
-Present all findings in a single pass, then collect all user answers in one batch before spawning fix agents. Do NOT apply edits one-by-one and do NOT defer Decision-Required items until after Mechanical fixes are applied — everything is answered together, then executed together.
+The deterministic cross-phase checks (tiers, `depends_on` cycles/forward-refs, sibling
+shared files, complexity enum, user-required id validity, empty `test_command`,
+exempt-phase-solo-tier) are already computed in JS and arrive as `crossPhase` findings —
+you do not re-run them by hand.
 
-### 1. Mechanical Fixes Table
+## Consolidate
 
-Show the full Mechanical Fixes table from the combined report. This is presentation only — no approval is requested here in isolation. The user will approve/subset in step 3.
+- **Deduplicate**: merge per-phase findings that describe the same underlying issue.
+- **Promote on conflict**: a `minor` finding that conflicts with another phase becomes at
+  least `major`.
+- **Stable IDs**: per-phase `P{phase}-M{n}` / `P{phase}-D{n}`; cross-phase keep their `X-*`
+  ids. Treat `classification: mechanical` as Mechanical and `decision-required` as Decision.
 
-### 2. Decision-Required Items (compact)
+Overall verdict is `ready` if no `critical`/`major` remain after fixes are chosen, else
+`needs-revision`.
 
-For each Decision-Required item, present in this compact format (no long pros/cons — the full report at `spec/reviews/spec-phase-{n}.md` has those if the user wants them):
+## Present Findings (one pass, then one batched question)
+
+1. Show the **Mechanical Fixes** table (ID, severity, location, problem, proposed fix) — all
+   per-phase + cross-phase mechanical findings.
+2. For each **Decision-Required** item, show the compact form:
 
 ```
 **{ID} — {short title}** ({severity})
-{1–3 line description of the problem and why it needs a decision.}
+{1–3 lines: the problem and why it needs a decision.}
 Options:
-  A) {concrete fix — one short line}
-  B) {concrete fix — one short line}
-  (C) {concrete fix — one short line, if a meaningfully distinct third path exists}
+  A) {concrete fix — one line}
+  B) {concrete fix — one line}
 ```
 
-### 3. Collect All Answers in One Batch
+3. Issue a single `AskUserQuestion` containing:
+   - "Approve Mechanical fixes?" → `all` / `subset (list IDs)` / `none`
+   - one question per Decision-Required item → `A` / `B` / `C` / `skip` / `custom`
 
-Issue a single `AskUserQuestion` call containing:
-- One question: "Approve Mechanical fixes?" — choices: `all` / `subset (list IDs)` / `none`
-- One question per Decision-Required item: which option — choices: `A` / `B` / `C` / `skip` / `custom (user writes instruction)`
+Do not proceed until the mechanical-approval answer and every decision item are answered.
+For `custom`, take the free-text instruction as the fix directive verbatim.
 
-Do not proceed until you have an answer for the mechanical-approval question AND every Decision-Required item. If the user picks `custom`, take their free-text instruction as the fix directive verbatim.
+## Apply Fixes
 
-### 4. Batch and Spawn Fix Agents
+Group approved fixes by spec file. Invoke:
 
-Consolidate all approved fixes, grouped by spec file. For each spec file that needs edits, spawn one `claude-orchestrator:fix-agent` agent as a background Task. Spawn all fix agents in a single message, then collect results with `TaskOutput(task_id, block=true)`.
+```
+Workflow({
+  scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/apply-fixes.mjs",
+  args: {
+    project_dir, plugin_root,
+    clusters: [{
+      targets: ["spec/phase-{n}-{name}.md"],
+      run_tests: false,
+      edits: [{ id, source, file, old_string?, new_string?, directive? }]
+    }]
+  }
+})
+```
 
-Do NOT spawn `claude-orchestrator:implementer` for spec-file edits — that agent is built around the hybrid implementation pipeline (locks, `spec/progress.md`, hybrid state) and will create lock directories and progress entries that don't belong in a spec-review session. `claude-orchestrator:fix-agent` is the correct agent type.
+Label mechanical edits `mechanical:{id}` with verbatim before/after text from `proposed_fix`;
+label decision edits `user-decision:{id}` with the chosen option (or custom text) as the
+directive. Spec files have no tests, so `run_tests` is false. Reissue any `mismatches`.
 
-Each fix-agent prompt contains:
-- The spec file path to edit (single-file target list)
-- The list of approved Mechanical edits, each labelled `auto-fix:mechanical:{id}` with verbatim before/after text from the Proposed Fix column
-- The list of resolved Decision-Required edits, each labelled `user-decision:{id}` with the user's chosen option (or their custom free-text instruction) as the edit directive
-- No test directive (spec files don't have tests)
-- A report directive: "summarise what changed in line-by-line terms"
+## Final Summary
 
-### 5. Final Summary
-- Mechanical fixes applied / skipped (count by phase)
-- Decision-Required items resolved / skipped (count by phase)
-- Any edits the fix agents reported they couldn't apply, with reason
-- Whether the overall verdict is now `ready` or still `needs-revision`
-
-## Context Conservation
-
-You are the interface AND the fixer — but still keep context lean:
-- **ALWAYS use `run_in_background: true` on Task calls.**
-- **Use `TaskOutput(block=true)` only.** Never poll with `block=false`.
-- **Spawn-then-wait**: Spawn all review agents in one message, then `TaskOutput` each.
-- The agent's Task output IS the full report. Do not re-read the report files from disk during aggregation.
-- Read each phase spec at most once during cross-phase checks. Read it again only when actually applying a fix to that file.
-
-## Shell Safety (Windows)
-
-This project runs on Windows with Git Bash. All bash commands MUST:
-- **Double-quote all paths** — backslashes are escape characters in unquoted strings.
-- **Use forward slashes** in paths, never backslashes.
-- **Use `/dev/null`**, never `NUL`.
-- **Invoke scripts with `bash` explicitly**.
+- Mechanical fixes applied / skipped (by phase)
+- Decision items resolved / skipped (by phase)
+- Edits the fix workflow could not apply (scope mismatches), with reason
+- Whether the verdict is now `ready` or still `needs-revision`
 
 ## Important
 
-- Run the materialize script during setup (step 5).
-- Do not review specs yourself. Spawn review-spec agents for per-phase review. You do cross-phase checks, aggregation, and the user-facing decision loop.
-- You do NOT apply edits yourself. Present findings in one pass, collect all user answers in one batched `AskUserQuestion`, then spawn `claude-orchestrator:fix-agent` agents (one per target spec file) to apply the approved edits.
-- Never queue a fix-agent edit for a Decision-Required item without the user picking an option (or supplying their own). "Probably option A" is not approval — skip it and report it as deferred.
-- Agent instructions are delivered via the `spec/.context/` copies produced by `materialize-context.sh`. The agent type does not bypass this — every review-spec agent reads `spec/.context/review-spec.md` as its first action, as the prompt template directs.
+- You never review specs or edit spec files yourself — the workflow's agents do the review,
+  the fix workflow's agents apply edits. You consolidate, present, collect answers, drive.
+- Never queue a decision-required fix without the user's pick. "Probably A" is not approval.
+- The deterministic cross-phase checks are authoritative and free — never duplicate them by
+  hand or second-guess their tier math.
+
+## Shell Safety (Windows)
+
+Git Bash on Windows: double-quote paths, forward slashes, `/dev/null` not `NUL`, Unix commands.

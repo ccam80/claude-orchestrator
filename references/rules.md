@@ -28,8 +28,8 @@ These rules are absolute. No agent may override, soften, or interpret them flexi
 
 This project runs on Windows with Git Bash. All bash commands MUST be Windows-safe:
 
-- **Always double-quote paths.** Backslashes are interpreted as escape characters in unquoted strings. Every path in every command must be wrapped in double quotes: `mkdir -p "spec/.locks/tasks"`, not `mkdir -p spec/.locks/tasks`.
-- **Use forward slashes in paths.** Write `"spec/.locks/files/src__main.py"`, not `"spec\.locks\files\src__main.py"`. Git Bash handles forward slashes natively. Backslashes require quoting and are fragile.
+- **Always double-quote paths.** Backslashes are interpreted as escape characters in unquoted strings. Every path in every command must be wrapped in double quotes: `mkdir -p "spec/reviews"`, not `mkdir -p spec/reviews`.
+- **Use forward slashes in paths.** Write `"spec/reviews/phase-2.md"`, not `"spec\reviews\phase-2.md"`. Git Bash handles forward slashes natively. Backslashes require quoting and are fragile.
 - **Never use `NUL`** — use `/dev/null`.
 - **Never use Windows-native commands** (`dir`, `del`, `copy`, `type`, `findstr`). Use their Unix equivalents (`ls`, `rm`, `cp`, `cat`, `grep`).
 - **Quote variable expansions.** Write `"${TASK_ID}"` not `${TASK_ID}` when the value could contain spaces or special characters.
@@ -52,21 +52,30 @@ A "user-required task" is any task whose spec explicitly says the user must conf
 
 User-required tasks are **hard stop gates**. They are enforced by three independent mechanisms:
 
-1. **Spec-time enumeration.** The implement-hybrid coordinator, at setup, lists every user-required task_id in `user_required_tasks[group]` on the relevant batch in `spec/.hybrid-state.json`. A task that the coordinator forgets to enumerate cannot be acked, and the group will never PASS.
-2. **User-only ack script.** The only valid completion of a user-required task is the **user** personally running `bash "${CLAUDE_PLUGIN_ROOT}/scripts/ack-user-gate.sh" <task_id> "<one-line evidence>"` in their own terminal, outside this Claude Code session. A PreToolUse hook (`gate-user-ack.sh`) blocks every Claude-initiated invocation of `ack-user-gate.sh` — direct Bash calls, `!`-prefixed commands, background Tasks, all of them. No agent may ack on the user's behalf.
-3. **Server-side PASS rejection.** `mark-verified.sh` refuses to record PASS for any task_group whose `user_required_tasks` list contains an unacked task. Even a wave-verifier that mistakenly reports PASS will be rejected by the script.
+1. **Manifest enumeration.** `plan-spec` records every user-required task_id in
+   `user_required_tasks[group]` in `spec/manifest.json`. The `implement-hybrid` skill carries
+   that list into each batch's assignment. A task omitted here cannot be acked, and its group
+   will never PASS.
+2. **Implementer refusal.** An implementer assigned a user-required task does not complete it.
+   It implements everything else in the group and returns `status: "user_action_required"`,
+   which the workflow surfaces to the skill as a blocker. The implementer never stubs the
+   task, never inserts placeholder values, and never acks on the user's behalf.
+3. **Verifier rejection.** The wave-verifier FAILs any group whose user-required task is not
+   listed as acked in its assignment. A user confirms the real-world action through the
+   skill's `AskUserQuestion` gate; only then does the skill mark the task acked and re-invoke
+   the workflow. No agent can fabricate that confirmation.
 
 ### What every agent must NOT do
 
 - Do not recommend deferring a user-required task. "We can wire this up later", "for now let's stub it", "the user can fill this in post-deployment" — all prohibited outputs. If you find yourself drafting that recommendation, stop and surface the ack command instead.
-- Do not ack on the user's behalf, even if the user says "just confirm it for me". The hook will block the attempt; the correct response is to hand them the command.
+- Do not ack on the user's behalf, even if the user says "just confirm it for me". The correct response is to surface the action and let the user confirm it through the skill's gate.
 - Do not insert placeholder values, write TODO comments, add "to be configured later" notes, or stub functionality that assumes the user will act later. These are treated as equivalent to `raise NotImplementedError`.
 - Do not mark a user-required task as `complete` or `partial`. The only valid exit for a user-required task an implementer cannot resolve is the Clarification Exit.
 - Do not advance past a user-required task while it remains unacked, no matter how long it has been waiting. It is a gate, not a timeout.
 
 ### Role-specific responsibilities
 
-- **Implementer**: If your assigned task requires user action, take the Clarification Exit (see `agents/implementer.md`) with Blocker `USER ACTION REQUIRED` and describe exactly what the user must do, including the exact ack command.
-- **Wave-verifier**: A user-required task without an entry in `user_acks` is an automatic FAIL. Do not accept coordinator narration ("user told me they did it") as a substitute for the ack entry.
-- **Reviewer**: A user-required task marked complete without coordinator confirmation is always a `critical` severity finding.
-- **Coordinator (implement-hybrid)**: Surface the ack command to the user via `AskUserQuestion` the moment you know a batch contains a user-required task. Wait for the ack to land in `spec/.hybrid-state.json` before spawning the wave-verifier.
+- **Implementer**: If your assigned task requires user action, return `status: "user_action_required"` (see `agents/implementer.md`) describing exactly what the user must do and what evidence to report. Implement the rest of the group normally.
+- **Wave-verifier**: A user-required task not listed as acked in your assignment is an automatic FAIL. Do not accept narration ("user told me they did it") as a substitute.
+- **Reviewer**: A user-required task marked complete without a genuine user confirmation is always a `critical` severity finding.
+- **Coordinator (implement-hybrid skill)**: Surface the action to the user via `AskUserQuestion` the moment a batch's blocker reports it. Only after the user confirms do you mark the task acked and re-invoke the workflow for that group.

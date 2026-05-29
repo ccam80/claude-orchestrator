@@ -8,14 +8,15 @@ You are operating within the claude-orchestrator plugin. This plugin manages str
 - **plan-orchestrated** — generate a high-level implementation plan with phases, waves, and verification measures
 - **plan-spec** — produce a detailed implementation spec for a single phase
 - **review-spec** — review phase specs for quality, consistency, and implementability before implementation
-- **implement-hybrid** — 2-level coordinator → implementer architecture with state-file coordination, in-band recording scripts, and a wave-verifier gate per batch
+- **implement-hybrid** — skill that drives a per-batch workflow (`workflows/implement.mjs`): the skill computes the tier/batch schedule and stays the human gateway; the workflow fans out implementers and wave-verifiers and runs headless fix rounds
 - **review-orchestrated** — review completed implementation against specs and rules
 
-### Agents (spawned by skills)
-- **implementer** — executes tasks as specified, writes tests, self-continues to next task. Spawned by `implement-hybrid`.
-- **wave-verifier** — audits each batch for spec coverage, rule compliance, and test regressions; records PASS/FAIL per task_group in `spec/.hybrid-state.json` via `mark-verified.sh`. Spawned by `implement-hybrid`.
-- **reviewer** — audits completed phases against specs and rules, reports findings. Spawned by `review-orchestrated`.
-- **review-spec** — audits a phase spec for coverage, consistency, completeness, concreteness, implementability. Spawned by `review-spec`.
+### Agents (spawned by workflows)
+- **implementer** — executes tasks as specified, writes tests, self-continues through its task_group, returns a structured `IMPL_RESULT`. Spawned by `workflows/implement.mjs`.
+- **wave-verifier** — audits each batch for spec coverage, rule compliance, and test regressions; returns a structured `VERIFY_RESULT` (PASS/FAIL per task_group). Spawned by `workflows/implement.mjs`.
+- **reviewer** — audits a completed phase against specs and rules, returns structured findings. Spawned by `workflows/review.mjs`.
+- **review-spec** — audits a phase spec for coverage, consistency, completeness, concreteness, implementability, returns structured findings + Files Owned. Spawned by `workflows/review-spec.mjs`.
+- **fix-agent** — applies a pre-resolved edit list to a fixed file set, returns a structured `FIX_RESULT`. Spawned by `workflows/apply-fixes.mjs`.
 
 ## Core Principles
 
@@ -50,8 +51,8 @@ These rules apply to ALL sessions — planning, speccing, and implementation.
 
 ### User-Required Tasks
 - Tasks whose spec explicitly requires the user are **hard stop gates**. No task can pass verification with any form of deferral on a user-required action without explicit user permission through the orchestrator.
-- Implementers must take the Clarification Exit path for user-required tasks — they cannot mark them complete.
-- The coordinator must surface user-required tasks immediately and hold the batch open until the user confirms completion.
+- Implementers must return `user_action_required` for user-required tasks — they cannot mark them complete.
+- The implement-hybrid skill must surface user-required tasks immediately via `AskUserQuestion` and not advance the group until the user confirms completion.
 - Verifiers and reviewers must FAIL any task_group where a user-required action was deferred, stubbed, or placeholdered.
 
 ### Agent Discipline

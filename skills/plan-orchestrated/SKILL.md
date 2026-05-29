@@ -2,7 +2,7 @@
 name: plan-orchestrated
 description: Generate a high-level implementation plan with phases, waves, and verification measures. Collaboratively define goals, scope, and task structure with the user.
 argument-hint: <feature or task to plan>
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Task, EnterPlanMode]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, EnterPlanMode]
 ---
 
 # Plan Orchestrated
@@ -78,7 +78,7 @@ The last phase of every plan is a complete audit for any remaining legacy refere
 Phase boundaries are decided by two criteria, in this order:
 
 1. **Parallelisability**: Independent work that does not need each other's output goes into sibling phases (same parallel tier in the dependency graph). Sequential work — where Phase B genuinely needs Phase A's output — goes into a downstream phase.
-2. **File locality**: The same file should not be touched by more than one phase. Group all changes to a given file into a single phase wherever the dependency graph allows it. Splitting a file across phases multiplies agent context (each phase's agents must re-read the file, re-understand it, and re-coordinate edits) and creates merge friction with no benefit.
+2. **File locality**: The same file should not be touched by more than one phase. Group all changes to a given file into a single phase wherever the dependency graph allows it. Splitting a file across phases multiplies agent context (each phase's agents must re-read the file, re-understand it, and re-coordinate edits) and creates merge friction with no benefit. For **sibling phases** (same parallel tier), file locality is not just hygiene — it is a hard correctness requirement: siblings run concurrently at implementation time, so a file shared between two siblings means two implementers fighting the same lock. `review-spec` fails any plan where sibling phases share a file.
 
 **Anti-patterns to avoid:**
 - "Phase 2: Models, Phase 3: Services, Phase 4: API" when models, services, and API for the same feature could be one phase per feature — splitting by layer scatters every feature across every phase and forces every agent to load every layer.
@@ -103,7 +103,9 @@ Phase 1 (Foundation)
 └──→ Phase 5 (Qux)       ─── after 4 + 2 ─────────┘
 ```
 
-**Waves**: Within each phase, group tasks into waves. Tasks within a wave can potentially be implemented in parallel. Tasks in later waves depend on earlier waves completing.
+**Machine-readable dependencies (mandatory).** The dependency graph above is prose; the implementation runtime needs it as data. Every phase MUST carry an explicit, parseable `**Depends on**:` line naming its direct prerequisite phases, written as a phase-number list (`plan-spec` transcribes this verbatim into each phase's `depends_on` array in `spec/manifest.json`, which drives parallel scheduling). Use the template's form — `**Depends on**: Phase 1 — \`depends_on: [1]\`` — on every phase. Phase 0 is `depends_on: []`; the Legacy Reference Review phase depends on every other phase. List only **direct** prerequisites, not transitive ones. This is not optional and there is no fallback: a phase without a `depends_on` declaration is an incomplete plan and `review-spec` will fail the manifest.
+
+**Waves**: Within each phase, group tasks into waves. Tasks within a wave can potentially be implemented in parallel. Tasks in later waves depend on earlier waves completing. At implementation time, the *k*-th wave of every sibling phase in a tier is merged into a single concurrent batch, so keep wave boundaries genuinely about intra-phase ordering — do not use them for cross-phase coordination (that is what phase tiers are for).
 
 **Tasks**: Each task is a discrete unit of work. For each task, define:
 - A clear description of what to build

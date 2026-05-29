@@ -2,7 +2,7 @@
 name: plan-spec
 description: Take a phase from the implementation plan and produce a detailed implementation spec through collaborative architecting. Every design decision goes through the user.
 argument-hint: <phase name or number>
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Task]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion]
 ---
 
 # Plan Spec
@@ -89,7 +89,7 @@ Populate the **Files Owned** section at the top of the spec by enumerating every
 For each wave, form **task_groups** and record them in `spec/manifest.json` (see step 9 — Write the Manifest). A task_group is the set of tasks one implementer will own end-to-end. The coordinator reads these from the manifest verbatim and spawns one implementer per group. Task_groups live ONLY in the manifest — do not write a Task Groups table into the phase spec file.
 
 Form groups by these rules, in order:
-1. **File locality binds.** Two tasks that touch the same file MUST be in the same group. Otherwise they fight over the file lock and one will block the other or take the Clarification Exit.
+1. **File locality binds.** Two tasks that touch the same file MUST be in the same group. Groups in a batch run as concurrent implementers, so two groups sharing a file means two agents writing it at once — their edits clobber each other. There is no lock to save you; file-disjoint groups are the mechanism.
 2. **Hard cap: 10 files per group** (the union of every task's Files to create + Files to modify across the group). Target 4–6. If a group exceeds 10 files, split it. If splitting forces two groups to touch the same file, the phase is wrongly scoped — escalate to the user.
 3. **Complexity influences sizing within the cap.** A group of L-complexity tasks should be smaller than a group of S-complexity tasks; an agent's reading + reasoning budget is the limit, not the file count alone.
 4. **One implementer per group.** Do not propose groups that "could be split if needed" — commit to a structure.
@@ -109,7 +109,8 @@ After the phase spec is settled, record this phase's slice in `spec/manifest.jso
 
 - **Create-if-absent.** If `spec/manifest.json` does not exist, create it with `test_command` (from the project `CLAUDE.md`), `verification` (the final acceptance checks from `spec/plan.md`'s Verification section), and an empty `phases` array.
 - **Rewrite this phase's slice.** Read the existing manifest, replace this phase's entry (or append it if new), and write the whole file back. Keep `phases` ordered by phase number; keep `waves` in execution order. Never hand-edit another phase's slice.
-- **Per phase**, record `phase`, `name`, `spec_file`, and `waves`. Per wave, record every task_group from step 7 as `{group_id, tasks, user_required_tasks}`. Each task carries its `id` and `complexity` (`S`/`M`/`L`, from `spec/plan.md`).
+- **Per phase**, record `phase`, `name`, `spec_file`, `depends_on`, and `waves`. Per wave, record every task_group from step 7 as `{group_id, tasks, user_required_tasks}`. Each task carries its `id` and `complexity` (`S`/`M`/`L`, from `spec/plan.md`).
+- **`depends_on`.** Transcribe this phase's `**Depends on**:` line from `spec/plan.md` into a phase-number array — the direct prerequisites only (e.g. `**Depends on**: Phase 1` → `"depends_on": [1]`; Phase 0 → `[]`; the Legacy Reference Review phase → every other phase number). This is a local fact about your phase, so it stays inside your per-phase write boundary. `implement-hybrid` reads it to compute parallel tiers and merge sibling phases' waves into concurrent batches; an omitted or wrong `depends_on` produces a wrong schedule, and there is no fallback — `review-spec` fails a manifest where any phase lacks it. If `plan.md` has no parseable `**Depends on**:` line for this phase, stop and fix the plan first; do not invent the dependency.
 - **`user_required_tasks`.** For each task_group, list the task IDs whose spec explicitly requires a real-world user action (the user must configure, provide, verify, deploy, or otherwise act where no agent can). Empty list if none. `implement-hybrid`'s user-required gate is seeded directly from this field — a task you omit here cannot be acked, so the group would stall. Enumerate carefully.
 - If a spec decision changed the phase/wave/task structure, the manifest slice you write must match the final spec — they are checked for consistency by `review-spec`.
 

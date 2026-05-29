@@ -43,7 +43,7 @@ and are mandatory in every plan.
 ---
 
 ## Phase 0: Dead Code Removal
-**Depends on**: (none — runs first)
+**Depends on**: none (runs first) — `depends_on: []`
 
 Remove all code, tests, imports, references, config entries, and documentation
 that will become dead or obsolete as a result of this plan. This will break
@@ -57,7 +57,7 @@ the build and tests — that is expected. Subsequent phases build the replacemen
 ---
 
 ## Phase 1: {Name}
-**Depends on**: Phase 0
+**Depends on**: Phase 0 — `depends_on: [0]`
 
 ### Wave 1.1: {Description}
 | Task | Description | Complexity | Key Files |
@@ -71,8 +71,8 @@ the build and tests — that is expected. Subsequent phases build the replacemen
 | 1.2.1 | ... | S/M/L | ... |
 
 ## Phase 2: {Name}
-**Depends on**: Phase 1
-**Parallel with**: Phase 3
+**Depends on**: Phase 1 — `depends_on: [1]`
+**Parallel with**: Phase 3 (same tier — must be file-disjoint with it)
 
 ### Wave 2.1: {Description}
 | Task | Description | Complexity | Key Files |
@@ -82,7 +82,7 @@ the build and tests — that is expected. Subsequent phases build the replacemen
 ---
 
 ## Phase {N}: Legacy Reference Review
-**Depends on**: all previous phases
+**Depends on**: all previous phases — `depends_on: [0, 1, 2, …, N-1]` (list every other phase explicitly)
 
 Audit the entire repository for any remaining references to removed code:
 imports, type annotations, string literals, config values, documentation,
