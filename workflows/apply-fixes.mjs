@@ -13,7 +13,8 @@ export const meta = {
 //     run_tests: bool,                     // run test_command after edits
 //     edits: [{ id, source, file, old_string?, new_string?, directive?, report_hint? }]
 //   }]
-const { project_dir, plugin_root, test_command, baseline_file, clusters } = args
+const _args = typeof args === 'string' ? JSON.parse(args) : args
+const { project_dir, plugin_root, test_command, baseline_file, clusters } = _args
 
 const FIX_SCHEMA = {
   type: 'object',

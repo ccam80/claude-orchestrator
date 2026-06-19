@@ -21,6 +21,7 @@ the human-readable reference.
   "status": "complete | needs_clarification | user_action_required",
   "files_created": ["src/foo.py"],
   "files_modified": ["src/bar.py"],
+  "out_of_scope_regressions": ["tests/other_test.py::test_z fails on code in src/other.py (outside my footprint)"],
   "tasks": [{ "id": "T2.1.1", "status": "complete | not_started" }],
 
   // present only when status == needs_clarification
@@ -48,6 +49,10 @@ the human-readable reference.
 - `user_action_required` — a task in the group requires a real-world user action no
   agent can perform. The implementable remainder is still implemented; the group cannot
   pass until the user acks. Same bubble-up path as `needs_clarification`.
+- `out_of_scope_regressions` — optional. A test failed because of code OUTSIDE this group's
+  owned footprint. The implementer must NOT edit or delete that code to make the test pass
+  (a forbidden test-chasing fix); it records the failure here instead. The workflow surfaces
+  these to the coordinator. Empty/omitted when there are none.
 
 ## wave-verifier → `VERIFY_RESULT`
 

@@ -42,6 +42,21 @@ This project runs on Windows with Git Bash. All bash commands MUST be Windows-sa
 - Never use `git clean` to remove untracked files.
 - If you need to understand pre-existing test state, read `spec/test-baseline.md`.
 
+**These are mechanically enforced, not just policy.** While an orchestrated run is active, a
+PreToolUse scope guard (`hooks/guard-destructive-fs.mjs`) refuses `rm`, `unlink`, `rmdir`,
+`git clean`, `git checkout`, `git reset --hard`, `git stash`, `git rm`, and equivalents.
+Parallel agents share one working tree; a blocked command means you were about to destroy
+work — yours or another agent's. Use the `Edit` tool to remove code from a file you own; if a
+whole file must be deleted, surface it as a coordinator decision in your structured result.
+
+## File Scope
+- An implementer/fix-agent may only create, edit, rename, or delete files inside its own
+  assigned footprint (the spec's "Files to create" / "Files to modify" for its tasks, or the
+  fix-agent's explicit target list). Files outside it may belong to another concurrent agent.
+- **Never delete or empty a file to make a test pass.** A test failing on code outside your
+  footprint is an *out-of-scope regression* to report, not to fix. Touching that code to turn
+  a test green is a forbidden test-chasing fix and an automatic verification FAIL.
+
 ## Agent Discipline
 - Never soften, reinterpret, or "pragmatically adjust" these rules.
 - If a rule seems to conflict with the task, flag it to the orchestrator. Do not resolve the conflict yourself.

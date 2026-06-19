@@ -11,7 +11,8 @@ export const meta = {
 //   project_dir, plugin_root
 //   manifest      the parsed spec/manifest.json
 //   phases: [{ phase, name, spec_file }]   // phases in scope
-const { project_dir, plugin_root, manifest, phases } = args
+const _args = typeof args === 'string' ? JSON.parse(args) : args
+const { project_dir, plugin_root, manifest, phases } = _args
 
 const FINDING = {
   type: 'object',

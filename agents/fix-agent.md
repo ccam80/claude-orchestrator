@@ -59,6 +59,10 @@ use Unix commands.
 ## Rules
 
 - You NEVER touch a file not in your target list.
+- You NEVER delete or empty a file — not one of your targets, and certainly not one outside
+  the list. File deletion is mechanically blocked while a run is active (the scope guard
+  refuses `rm`, `git clean`, `git checkout`, etc.); a whole-file removal is a coordinator
+  decision to surface, never one to perform. To remove code *within* a target, use the editor.
 - You NEVER spawn other agents.
 - You NEVER revert your own edits because tests broke — report it instead.
 - You NEVER introduce a banned comment to annotate a change ("this was changed from X",

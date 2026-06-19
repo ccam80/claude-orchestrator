@@ -22,7 +22,8 @@ export const meta = {
 //       acked_user_tasks:   [taskId],                // already acked by the user
 //     }]
 //   }
-const { project_dir, plugin_root, test_command, baseline_file, batch } = args
+const _args = typeof args === 'string' ? JSON.parse(args) : args
+const { project_dir, plugin_root, test_command, baseline_file, batch } = _args
 const groups = batch.groups
 
 const IMPL_SCHEMA = {
@@ -33,6 +34,7 @@ const IMPL_SCHEMA = {
     status: { enum: ['complete', 'needs_clarification', 'user_action_required'] },
     files_created: { type: 'array', items: { type: 'string' } },
     files_modified: { type: 'array', items: { type: 'string' } },
+    out_of_scope_regressions: { type: 'array', items: { type: 'string' } },
     tasks: {
       type: 'array',
       items: {
@@ -98,7 +100,7 @@ const tasksTable = (g) =>
 
 function implementerPrompt(g, fixReasons) {
   const fixBlock = fixReasons
-    ? `\n## This is a FIX round\nA prior implementation of this group FAILED verification. Address every reason below, then re-run tests:\n${fixReasons.map((r) => `- ${r}`).join('\n')}\n`
+    ? `\n## This is a FIX round\nA prior implementation of this group FAILED verification. Address every reason below, then re-run tests:\n${fixReasons.map((r) => `- ${r}`).join('\n')}\n\n**Stay inside your file scope while fixing.** If a failing test implicates a file outside your owned footprint (below), you may NOT edit, empty, or delete it to make the test pass — that is a forbidden test-chasing fix and an automatic verification FAIL. Treat it as an out-of-scope regression: record it under \`out_of_scope_regressions\` and leave the file untouched.\n`
     : ''
   const ackedNote = g.user_required_tasks.length
     ? `\n## User-required tasks in this group\n${g.user_required_tasks
@@ -120,6 +122,16 @@ through them in order. Do not pick up tasks outside this group.
 | ID | Title | Complexity |
 |----|-------|------------|
 ${tasksTable(g)}
+
+## File scope (hard boundary)
+Your writable footprint is EXACTLY the union of the "Files to create" and "Files to modify"
+entries the spec lists for the task IDs above — nothing else. Other groups run in parallel in
+this same working tree; files outside your footprint may be theirs.
+- Never create, edit, rename, or delete a file outside your footprint.
+- Never delete or empty ANY file to make a test pass. Deletion is blocked during the run; if
+  you believe a file must be removed, that is a coordinator decision — surface it, do not do it.
+- A test failing because of code outside your footprint is a regression to REPORT
+  (\`out_of_scope_regressions\`), not to "fix" by touching that code.
 ${ackedNote}${fixBlock}
 ## Before anything else, read
 - ${plugin_root}/references/rules.md — non-negotiable rules (includes shell safety)
@@ -201,9 +213,12 @@ const files = {}
 const blockers = []
 const completedIds = []
 const deadIds = []
+const scopeRegressions = []
 implResults.forEach((r, i) => {
   if (!r) { deadIds.push(groups[i].group_id); return }
   files[r.group_id] = { created: r.files_created, modified: r.files_modified }
+  if (r.out_of_scope_regressions?.length)
+    scopeRegressions.push({ group_id: r.group_id, regressions: r.out_of_scope_regressions })
   if (r.status === 'needs_clarification') blockers.push({ group_id: r.group_id, type: 'clarification', detail: r.clarification })
   else if (r.status === 'user_action_required') blockers.push({ group_id: r.group_id, type: 'user_action', detail: r.user_action })
   else completedIds.push(r.group_id)
@@ -230,7 +245,7 @@ while (outstandingFailures.length && round < 2) {
   const reasonsById = Object.fromEntries(outstandingFailures.map((f) => [f.group_id, f.reasons]))
   const failedGroups = outstandingFailures.map((f) => byId[f.group_id])
 
-  await parallel(
+  const fixResults = await parallel(
     failedGroups.map((g) => () =>
       agent(implementerPrompt(g, reasonsById[g.group_id]), {
         label: `fix:${g.group_id}`,
@@ -241,6 +256,12 @@ while (outstandingFailures.length && round < 2) {
       }),
     ),
   )
+  for (const r of fixResults.filter(Boolean)) {
+    if (r.files_created || r.files_modified)
+      files[r.group_id] = { created: r.files_created || [], modified: r.files_modified || [] }
+    if (r.out_of_scope_regressions?.length)
+      scopeRegressions.push({ group_id: r.group_id, regressions: r.out_of_scope_regressions, round })
+  }
   const rv = await verifyGroups(failedGroups, 'Fix')
   Object.assign(verdicts, rv.verdicts)
   outstandingFailures = rv.failures.filter((f) => rv.verdicts[f.group_id] === 'FAIL')
@@ -256,4 +277,5 @@ return {
   blockers,            // [{group_id, type, detail}] — coordinator resolves with the user
   failures: outstandingFailures, // groups still FAIL after 2 rounds
   files,               // group_id -> {created, modified}
+  scope_regressions: scopeRegressions, // agents that hit out-of-scope test failures they refused to chase
 }

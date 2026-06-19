@@ -86,7 +86,19 @@ answered.
 ## Apply Fixes
 
 Consolidate all queued fixes (auto-fixes + resolved decisions) into clusters grouped by
-target file (or logically-related file cluster for cross-file fixes). Invoke:
+target file (or logically-related file cluster for cross-file fixes).
+
+When there are **2 or more clusters**, the fix-agents run in parallel in one working tree, so
+bracket the workflow with the same scope guard the implement skill uses — checkpoint first,
+arm the guard, audit after:
+
+```bash
+git add -A && git commit -m "co: checkpoint before apply-fixes" --allow-empty -q
+CHECKPOINT=$(git rev-parse HEAD)
+mkdir -p .omc/state && printf 'active' > .omc/state/co-guard-active   # only when >=2 clusters
+```
+
+Invoke:
 
 ```
 Workflow({
@@ -111,6 +123,21 @@ delete the comment if compliant, delete both code and comment if not, fix collat
 
 The workflow returns `{ reports, mismatches }`. Reissue any `mismatches` with corrected
 targets/old_strings.
+
+If you armed the guard, disarm and audit immediately — build a footprint whose `modified`
+list is the union of every cluster's `targets`, then:
+
+```bash
+rm -f .omc/state/co-guard-active
+# /tmp/co-footprint.json = { "fixes": { "created": [], "modified": [<all cluster targets>] } }
+node "${CLAUDE_PLUGIN_ROOT}/scripts/scope-audit.mjs" \
+  --checkpoint "$CHECKPOINT" --footprint /tmp/co-footprint.json --apply
+```
+
+Surface any violation it reports (a fix-agent that edited or deleted a file outside its
+assigned `targets`): deletions are restored from the checkpoint; an out-of-scope modification
+or an unrecoverable loss (exit 2) is a STOP-and-report. Always `rm -f
+.omc/state/co-guard-active` before finishing, including on any early exit.
 
 ## Verify and Report
 

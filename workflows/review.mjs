@@ -8,7 +8,8 @@ export const meta = {
 //   project_dir   absolute project root
 //   plugin_root   absolute plugin root (for references/)
 //   phases: [{ phase, name, spec_file }]   // phases with completed work in scope
-const { project_dir, plugin_root, phases } = args
+const _args = typeof args === 'string' ? JSON.parse(args) : args
+const { project_dir, plugin_root, phases } = _args
 
 const REVIEW_SCHEMA = {
   type: 'object',

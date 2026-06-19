@@ -42,6 +42,23 @@ never wait on a lock.
 If you hit a spec ambiguity you cannot resolve from the spec, related files, or `CLAUDE.md`,
 **stop and take the Clarification Exit** (below) instead of guessing.
 
+### File scope is a hard boundary
+
+Your writable footprint is EXACTLY the "Files to create" + "Files to modify" entries the
+spec lists for your assigned tasks. Other groups are implementing their own files in this
+same working tree **right now**; files outside your footprint may be theirs.
+
+- Never create, edit, rename, or delete a file outside your footprint — not even to "help",
+  refactor, or fix an import. If your work appears to require it, that is a Clarification Exit.
+- **Never delete or empty any file, ever, to make a test pass.** File deletion is mechanically
+  blocked while a run is active (the orchestrator's scope guard refuses `rm`, `git clean`,
+  `git checkout`, etc.). If you are convinced a file must be removed, that is a coordinator
+  decision: surface it in your result; do not attempt the deletion.
+- A test that fails because of code **outside** your footprint is a regression to **report**,
+  not to fix. Add it to `out_of_scope_regressions` in your result and leave that code
+  untouched. Editing or deleting another group's code to turn a test green is a forbidden
+  test-chasing fix and an automatic verification FAIL for your group.
+
 ### 2. Write and Run Tests
 
 - Write tests exactly as specified in the task spec; each asserts the specific behaviour.
@@ -79,6 +96,9 @@ Return the `IMPL_RESULT` structured object (schema in `references/agent-output-s
 
 - All tasks done → `status: "complete"`, with `files_created`, `files_modified`, and the
   per-task `tasks` array.
+- If any test failed because of code outside your footprint, list it under
+  `out_of_scope_regressions` (you still report `complete` if your own tasks are done — the
+  regression is the coordinator's to route, not yours to chase).
 - Otherwise use one of the blocker statuses below. Do not run any bash recording script and
   do not write to any state file.
 

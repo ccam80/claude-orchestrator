@@ -90,7 +90,29 @@ If there is no test command, write that and continue.
 
 For each batch in order (a batch only starts after the previous one is fully PASSED):
 
-### 1. Invoke the workflow
+### 1. Checkpoint and arm the scope guard
+
+Parallel implementers and the workflow's headless fix rounds share one working tree. Two
+mechanical protections bracket every batch — never skip them:
+
+1. **Checkpoint.** Record the clean pre-batch commit so any out-of-scope damage is recoverable:
+   ```bash
+   git add -A && git commit -m "co: checkpoint before {batch_id}" --allow-empty -q
+   CHECKPOINT=$(git rev-parse HEAD)
+   ```
+   (For batches after the first this is usually a no-op over the previous batch's completion
+   commit — that is fine; `--allow-empty` keeps it uniform.)
+2. **Arm the guard, but only for parallel batches.** If the batch has **2 or more**
+   task_groups, write the sentinel that activates the destructive-command guard
+   (`hooks/guard-destructive-fs.mjs`) for the duration of the workflow:
+   ```bash
+   mkdir -p .omc/state && printf 'active' > .omc/state/co-guard-active
+   ```
+   For a **single-group** batch (e.g. a solo Phase 0 dead-code-removal phase, where deleting
+   whole files is the legitimate task) do **not** write the sentinel — there is no sibling
+   agent to endanger, and the guard would block the spec'd deletions.
+
+### 2. Invoke the workflow
 
 ```
 Workflow({
@@ -107,11 +129,41 @@ The workflow returns:
   verdicts: { group_id: "PASS" | "FAIL" | "BLOCKED" | "DEAD" },
   blockers: [{ group_id, type: "clarification" | "user_action", detail }],
   failures: [{ group_id, reasons }],   // groups still FAIL after 2 fix rounds
-  files:    { group_id: { created, modified } }
+  files:    { group_id: { created, modified } },
+  scope_regressions: [{ group_id, regressions }]  // out-of-scope test failures agents refused to chase
 }
 ```
 
-### 2. Resolve blockers (the human gate)
+### 3. Disarm the guard and audit scope
+
+The moment the workflow returns, remove the sentinel (if you wrote one) and run the scope
+audit against the checkpoint — **before** resolving blockers or committing:
+
+```bash
+rm -f .omc/state/co-guard-active
+# write the workflow's returned `files` map to a temp file, then:
+node "${CLAUDE_PLUGIN_ROOT}/scripts/scope-audit.mjs" \
+  --checkpoint "$CHECKPOINT" --footprint /tmp/co-footprint.json --apply
+```
+
+The audit compares the working tree to the checkpoint and cross-references each group's
+reported footprint. It exits `0` clean, `1` if it found and recovered violations, `2` if a
+violation is **unrecoverable**. Act on the JSON it prints:
+
+- **`deleted` / `modified-out-of-scope`** — a file outside the changing group's footprint was
+  removed or edited. With `--apply` the audit restores deletions from the checkpoint; it only
+  *reports* out-of-scope modifications (they may be legitimate-but-unreported edits). Surface
+  every entry to the user — an agent reached outside its lane and the corresponding group's
+  PASS is suspect; treat that group as FAIL and re-run it.
+- **`created-then-deleted` with `recoverable: false` (exit 2)** — an agent created a file and
+  another agent destroyed it before it was ever committed; it cannot be recovered. **STOP.**
+  Report it to the user with the filename and the owning group; do not continue the run.
+
+Also surface any `scope_regressions` the workflow returned: these are out-of-scope test
+failures an implementer correctly refused to chase. Route each to the group that actually owns
+the implicated file (re-run that group), never by having the reporting group touch it.
+
+### 4. Resolve blockers (the human gate)
 
 For every blocker:
 
@@ -130,15 +182,15 @@ For every blocker:
 A `DEAD` verdict means an implementer returned no result — re-invoke the workflow for that
 group. After two `DEAD` rounds for the same group, stop and report to the user.
 
-### 3. Handle persistent failures
+### 5. Handle persistent failures
 
 If `failures` is non-empty (a group still FAILs after the workflow's two internal fix
 rounds), STOP and report the reasons to the user. Ask how to proceed — do not silently
 narrow scope or accept the failure.
 
-### 4. Commit and continue
+### 6. Commit and continue
 
-Once every group in the batch is `PASS`:
+Once every group in the batch is `PASS` (and the scope audit is clean or fully recovered):
 
 ```bash
 git add -A
@@ -153,6 +205,9 @@ Then proceed to the next batch. When a whole tier is done, append a short tier s
 1. Run the manifest's `verification` checks (final acceptance criteria) and `test_command`.
 2. Report final status: phases/batches/tasks completed, verification outcomes, test results.
 3. Remove the baseline scratch file: `rm -f "spec/test-baseline.md"`.
+4. Remove the scope-guard sentinel if it is still present: `rm -f .omc/state/co-guard-active`.
+   Do this on **any** exit, including when you stop early on a blocker, persistent failure, or
+   an unrecoverable scope violation — never leave the sentinel armed after the run ends.
 
 ## User-Required Task Gate
 

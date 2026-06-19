@@ -73,6 +73,14 @@ assertions; `pytest.approx` with loose tolerances; mocked infrastructure where t
 not call for mocks; weak assertions (`is not None`, bare `isinstance`, `len(x) > 0` without
 content checks); assertions that verify implementation details or are trivially true.
 
+**Scope violation (automatic FAIL):** a group's implementer may only create/modify files in
+its own footprint (the spec's "Files to create" / "Files to modify" for its tasks). If the
+group's changed files include anything outside that footprint — or a file another group owns
+was deleted, emptied, or edited by this group — FAIL it. Deleting or disabling code to make a
+test pass is a forbidden test-chasing fix; it is never a valid way to reach green. A group's
+own `out_of_scope_regressions` are NOT held against it (it correctly refused to chase them);
+they are reported upward, not fixed by the implementer.
+
 ### Step 4: Run Tests
 
 Run the test command from your assignment. Compare against the baseline: tests that passed
