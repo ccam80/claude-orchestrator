@@ -2,7 +2,7 @@
   "name": "claude-orchestrator-marketplace",
   "metadata": {
     "description": "Orchestrated planning and parallel implementation for Claude Code. Plans features collaboratively, specs phases in detail, then drives workflows that fan out parallel implementer and verifier agents.",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "homepage": "https://github.com/ccam80/claude-orchestrator"
   },
   "owner": {
@@ -12,7 +12,7 @@
     {
       "name": "claude-orchestrator",
       "description": "Orchestrated planning and parallel implementation skills",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "source": "./",
       "strict": false,
       "skills": [
